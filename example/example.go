@@ -1,16 +1,35 @@
 package main
 
 import (
-	"os"
 	"donut"
-	"log"
 	"gozk"
+	"log"
+	"os"
 	"time"
 )
 
+type DumbBalancer struct {
+}
+
+func (*DumbBalancer) Init(c *donut.Cluster) {
+
+}
+
+func (*DumbBalancer) AddWork(id string) {
+
+}
+
+func (*DumbBalancer) RemoveWork(id string) {
+
+}
+
+func (*DumbBalancer) CanClaim() bool {
+	return true
+}
+
 type ExampleListener struct {
-	c *donut.Cluster
-	nodeId string
+	c       *donut.Cluster
+	nodeId  string
 	killers map[string]chan byte
 }
 
@@ -24,7 +43,7 @@ func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
 	go func() {
 		// only do this work for 10 seconds
 		time.Sleep(5 * time.Second)
-		l.c.CompleteWork("work-"+l.nodeId)
+		l.c.CompleteWork("work-" + l.nodeId)
 	}()
 }
 
@@ -65,9 +84,9 @@ func main() {
 
 	config.Servers = "localhost:50000"
 	config.NodeId = node
-	config.Timeout = 1*1e9
+	config.Timeout = 1 * 1e9
 
-	c := donut.NewCluster("example", config, listener)
+	c := donut.NewCluster("example", config, &DumbBalancer{}, listener)
 	listener.c = c
 	c.Join()
 	<-make(chan byte)

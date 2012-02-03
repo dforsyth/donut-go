@@ -33,13 +33,14 @@ type Cluster struct {
 	config                        *Config
 	nodes, work, claimed, owned   *SafeMap
 	listener                      Listener
+	balancer                      Balancer
 	state                         int32
 	zk                            *gozk.ZooKeeper
 	zkEv                          chan gozk.Event
 	nodeKill, workKill, claimKill chan byte
 }
 
-func NewCluster(clusterName string, config *Config, listener Listener) *Cluster {
+func NewCluster(clusterName string, config *Config, balancer Balancer, listener Listener) *Cluster {
 	return &Cluster{
 		clusterName: clusterName,
 		config:      config,
@@ -49,6 +50,7 @@ func NewCluster(clusterName string, config *Config, listener Listener) *Cluster 
 		owned:       NewSafeMap(nil),
 		listener:    listener,
 		state:       NewState,
+		balancer:    balancer,
 	}
 }
 
@@ -118,7 +120,8 @@ func (c *Cluster) setupWatchers() (err error) {
 	if c.nodeKill, err = watchZKChildren(c.zk, path.Join(base, "nodes"), c.nodes, func(m *SafeMap) {
 		log.Printf("nodes updated: %s", c.nodes.Dump())
 		c.getWork()
-		c.verifyWork()}); err != nil {
+		c.verifyWork()
+	}); err != nil {
 		log.Printf("error setting up nodes watcher: %v", err)
 		return
 	}
@@ -126,7 +129,8 @@ func (c *Cluster) setupWatchers() (err error) {
 	if c.workKill, err = watchZKChildren(c.zk, path.Join(base, c.config.WorkPath), c.work, func(m *SafeMap) {
 		log.Printf("work updated: %s", c.work.Dump())
 		c.getWork()
-		c.verifyWork()}); err != nil {
+		c.verifyWork()
+	}); err != nil {
 		log.Printf("error setting up work watcher: %v", err)
 		c.zk.Close()
 		return
@@ -134,7 +138,8 @@ func (c *Cluster) setupWatchers() (err error) {
 	if c.claimKill, err = watchZKChildren(c.zk, path.Join(base, "claim"), c.claimed, func(m *SafeMap) {
 		log.Printf("claim updated: %s", c.claimed.Dump())
 		c.getWork()
-		c.verifyWork()}); err != nil {
+		c.verifyWork()
+	}); err != nil {
 		log.Printf("error setting up work watcher: %v", err)
 		c.zk.Close()
 		return
@@ -172,7 +177,9 @@ func (c *Cluster) getWork() {
 			// log.Printf("failed to get work: %v", err)
 			continue
 		}
-		c.tryClaimWork(work, data)
+		if c.balancer.CanClaim() {
+			c.tryClaimWork(work, data)
+		}
 	}
 	c.work.RangeUnlock()
 }
@@ -190,6 +197,7 @@ func (c *Cluster) tryClaimWork(workId string, data map[string]interface{}) {
 func (c *Cluster) claimWork(workId string, data map[string]interface{}) (err error) {
 	claim := path.Join("/", c.clusterName, "claim", workId)
 	if _, err := c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
+		c.balancer.AddWork(workId)
 		c.startWork(workId, data)
 	} else {
 		log.Printf("Could not claim %s: %v", workId, err)
@@ -244,6 +252,7 @@ func (c *Cluster) endWork(workId string) {
 			log.Printf("Could not release %s: %v", workId, err)
 			return
 		}
+		c.balancer.RemoveWork(workId)
 		c.owned.Delete(workId)
 	}
 	c.listener.EndWork(workId)
@@ -264,7 +273,7 @@ func (c *Cluster) CompleteWork(workId string) {
 func (c *Cluster) verifyWork() {
 	var toRelease []string
 	m := c.owned.RangeLock()
-	for workId, _ := range m {
+	for workId := range m {
 		// XXX have to use Contains() here because the watch function inserts nil values on start and we might not get an update
 		if !c.work.Contains(workId) {
 			log.Printf("%s is no longer in work: %s", workId, c.work.Dump())
@@ -295,7 +304,7 @@ func (c *Cluster) Shutdown() {
 	atomic.StoreInt32(&c.state, ShutdownState)
 	m := c.owned.RangeLock()
 	c.owned.RangeUnlock()
-	for workId, _ := range m {
+	for workId := range m {
 		c.endWork(workId)
 	}
 	c.finish()
@@ -306,4 +315,14 @@ func (c *Cluster) Shutdown() {
 func (c *Cluster) finish() {
 	// XXX Close() will clean up all the watchers
 	c.zk.Close()
+}
+
+func (c *Cluster) rebalance() {
+	if atomic.LoadInt32(&c.state) == NewState {
+		return
+	}
+	for !c.balancer.CanClaim() {
+		// XXX need handoff logic for this, so that work is still being done until it is reassigned
+		break
+	}
 }
