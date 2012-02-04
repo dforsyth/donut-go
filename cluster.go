@@ -38,6 +38,7 @@ type Cluster struct {
 	zk                            *gozk.ZooKeeper
 	zkEv                          chan gozk.Event
 	nodeKill, workKill, claimKill chan byte
+	// BasePath, NodePath, WorkPath, ClaimPath string
 }
 
 func NewCluster(clusterName string, config *Config, balancer Balancer, listener Listener) *Cluster {

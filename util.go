@@ -109,6 +109,7 @@ func watchZKChildren(zk *gozk.ZooKeeper, path string, children *SafeMap, onChang
 				if !event.Ok() {
 					continue
 				}
+				// close(watch)
 				nodes, _, watch, err = zk.ChildrenW(path)
 				if err != nil {
 					log.Printf("Error in watchZkChildren: %v", err)
