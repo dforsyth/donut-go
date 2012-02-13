@@ -1,8 +1,9 @@
 package donut
 
 type Balancer interface {
-	Init(*Cluster)
+	Init(l Listener)
 	AddWork(string)
 	RemoveWork(string)
 	CanClaim() bool
+	HandoffList() []string
 }

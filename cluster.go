@@ -55,6 +55,10 @@ func NewCluster(clusterName string, config *Config, balancer Balancer, listener 
 	}
 }
 
+func (c *Cluster) Name() string {
+	return c.clusterName
+}
+
 func (c *Cluster) Nodes() (_nodes []string) {
 	m := c.nodes.RangeLock()
 	defer c.nodes.RangeUnlock()
@@ -62,6 +66,10 @@ func (c *Cluster) Nodes() (_nodes []string) {
 		_nodes = append(_nodes, k)
 	}
 	return
+}
+
+func (c *Cluster) ZKClient() *gozk.ZooKeeper {
+	return c.zk
 }
 
 func (c *Cluster) Join() /* int32 */ {
@@ -80,7 +88,7 @@ func (c *Cluster) Join() /* int32 */ {
 		c.zk, c.zkEv = zk, zkEv
 		c.createPaths()
 		c.joinCluster()
-		c.listener.OnJoin(c.zk)
+		c.listener.OnJoin(zk)
 		c.setupWatchers()
 		atomic.StoreInt32(&c.state, StartedState)
 		c.getWork()
@@ -260,17 +268,6 @@ func (c *Cluster) endWork(workId string) {
 	log.Printf("Ended work on %s", workId)
 }
 
-func (c *Cluster) CreateWork(workId string, data map[string]interface{}) (err error) {
-	if err = serializeCreate(c.zk, path.Join("/", c.clusterName, c.config.WorkPath, workId), data); err != nil {
-		log.Printf("Failed to create work %s: %v", workId, err)
-	}
-	return
-}
-
-func (c *Cluster) CompleteWork(workId string) {
-	c.zk.Delete(path.Join("/", c.clusterName, c.config.WorkPath, workId), -1)
-}
-
 func (c *Cluster) verifyWork() {
 	var toRelease []string
 	m := c.owned.RangeLock()
@@ -318,12 +315,46 @@ func (c *Cluster) finish() {
 	c.zk.Close()
 }
 
+func (c *Cluster) tryHandoff(workId string) error {
+	return nil
+}
+
 func (c *Cluster) rebalance() {
 	if atomic.LoadInt32(&c.state) == NewState {
 		return
 	}
-	for !c.balancer.CanClaim() {
-		// XXX need handoff logic for this, so that work is still being done until it is reassigned
-		break
+
+	if c.balancer.CanClaim() {
+		return
+	}
+
+	handoffList := c.balancer.HandoffList()
+	if len(handoffList) > 0 {
+		willTry := len(handoffList)
+		handoffComplete := make(chan byte)
+		for _, workId := range handoffList {
+			id := workId
+			go func() {
+				if err := c.tryHandoff(id); err == nil {
+					handoffComplete <- 1
+				} else {
+					handoffComplete <- 0
+				}
+			}()
+		}
+		failed := 0
+		done := 0
+		for complete := range handoffComplete {
+			if complete == 0 {
+				failed++
+			}
+			done++
+			if done == willTry {
+				close(handoffComplete)
+			}
+		}
+		if failed > 0 {
+			log.Printf("failed to handoff %d work assignments", failed)
+		}
 	}
 }

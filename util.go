@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gozk"
 	"log"
+	"path"
 	"sync"
 )
 
@@ -156,4 +157,15 @@ func getDeserialize(zk *gozk.ZooKeeper, path string) (data map[string]interface{
 	}
 	err = json.Unmarshal([]byte(e), &data)
 	return
+}
+
+func CreateWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId string, data map[string]interface{}) (err error) {
+	if err = serializeCreate(zk, path.Join("/", clusterName, config.WorkPath, workId), data); err != nil {
+		log.Printf("Failed to create work %s: %v", workId, err)
+	}
+	return
+}
+
+func CompleteWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId string) {
+	zk.Delete(path.Join("/", clusterName, config.WorkPath, workId), -1)
 }

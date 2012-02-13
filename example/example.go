@@ -11,7 +11,7 @@ import (
 type DumbBalancer struct {
 }
 
-func (*DumbBalancer) Init(c *donut.Cluster) {
+func (*DumbBalancer) Init(l donut.Listener) {
 
 }
 
@@ -27,6 +27,10 @@ func (*DumbBalancer) CanClaim() bool {
 	return true
 }
 
+func (*DumbBalancer) HandoffList() []string {
+	return make([]string, 0)
+}
+
 type ExampleListener struct {
 	c       *donut.Cluster
 	nodeId  string
@@ -39,11 +43,11 @@ func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
 	data := make(map[string]interface{})
 	// assign this work specifically to this node
 	data["example"] = l.nodeId
-	l.c.CreateWork("work-"+l.nodeId, data)
+	donut.CreateWork("example", zk, nil, "work-"+l.nodeId, data)
 	go func() {
 		// only do this work for 10 seconds
 		time.Sleep(5 * time.Second)
-		l.c.CompleteWork("work-" + l.nodeId)
+		donut.CompleteWork("example", zk, nil, "work-"+l.nodeId)
 	}()
 }
 
