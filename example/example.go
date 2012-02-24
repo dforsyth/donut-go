@@ -35,6 +35,7 @@ type ExampleListener struct {
 	c       *donut.Cluster
 	nodeId  string
 	killers map[string]chan byte
+	config  *donut.Config
 }
 
 func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
@@ -43,11 +44,11 @@ func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
 	data := make(map[string]interface{})
 	// assign this work specifically to this node
 	data["example"] = l.nodeId
-	donut.CreateWork("example", zk, nil, "work-"+l.nodeId, data)
+	donut.CreateWork("example", zk, l.config, "work-"+l.nodeId, data)
 	go func() {
 		// only do this work for 10 seconds
 		time.Sleep(5 * time.Second)
-		donut.CompleteWork("example", zk, nil, "work-"+l.nodeId)
+		donut.CompleteWork("example", zk, l.config, "work-"+l.nodeId)
 	}()
 }
 
@@ -92,6 +93,7 @@ func main() {
 
 	c := donut.NewCluster("example", config, &DumbBalancer{}, listener)
 	listener.c = c
+	listener.config = config
 	c.Join()
 	<-make(chan byte)
 }

@@ -16,42 +16,47 @@ const (
 )
 
 type Config struct {
-	NodeId   string
-	Servers  string
-	Timeout  int64
-	WorkPath string
+	NodeId        string
+	Servers       string
+	Timeout       int64
+	WorkPath      string
+	HandoffPrefix string
 }
 
 func NewConfig() *Config {
 	return &Config{
-		WorkPath: "work",
+		WorkPath:      "work",
+		HandoffPrefix: "handoff",
 	}
 }
 
 type Cluster struct {
-	clusterName                   string
-	config                        *Config
-	nodes, work, claimed, owned   *SafeMap
-	listener                      Listener
-	balancer                      Balancer
-	state                         int32
-	zk                            *gozk.ZooKeeper
-	zkEv                          chan gozk.Event
-	nodeKill, workKill, claimKill chan byte
+	clusterName                                                               string
+	config                                                                    *Config
+	nodes, work, claimed, owned, handoffRequest, handoffClaim, claimedHandoff *SafeMap
+	listener                                                                  Listener
+	balancer                                                                  Balancer
+	state                                                                     int32
+	zk                                                                        *gozk.ZooKeeper
+	zkEv                                                                      chan gozk.Event
+	nodeKill, workKill, claimKill, handoffRequestKill, handoffClaimKill       chan byte
+	basePath, handoffRequestPath, handoffClaimPath                            string
 	// BasePath, NodePath, WorkPath, ClaimPath string
 }
 
 func NewCluster(clusterName string, config *Config, balancer Balancer, listener Listener) *Cluster {
 	return &Cluster{
-		clusterName: clusterName,
-		config:      config,
-		nodes:       NewSafeMap(nil),
-		work:        NewSafeMap(nil),
-		claimed:     NewSafeMap(nil),
-		owned:       NewSafeMap(nil),
-		listener:    listener,
-		state:       NewState,
-		balancer:    balancer,
+		clusterName:    clusterName,
+		config:         config,
+		nodes:          NewSafeMap(nil),
+		work:           NewSafeMap(nil),
+		claimed:        NewSafeMap(nil),
+		owned:          NewSafeMap(nil),
+		handoffRequest: NewSafeMap(nil),
+		handoffClaim:   NewSafeMap(nil),
+		listener:       listener,
+		state:          NewState,
+		balancer:       balancer,
 	}
 }
 
@@ -59,11 +64,11 @@ func (c *Cluster) Name() string {
 	return c.clusterName
 }
 
-func (c *Cluster) Nodes() (_nodes []string) {
+func (c *Cluster) Nodes() (nodes []string) {
 	m := c.nodes.RangeLock()
 	defer c.nodes.RangeUnlock()
 	for k := range m {
-		_nodes = append(_nodes, k)
+		nodes = append(nodes, k)
 	}
 	return
 }
@@ -101,11 +106,15 @@ func (c *Cluster) Join() /* int32 */ {
 }
 
 func (c *Cluster) createPaths() {
-	base := path.Join("/", c.clusterName)
-	c.zk.Create(base, "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(base, "nodes"), "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(base, c.config.WorkPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(base, "claim"), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.basePath = path.Join("/", c.clusterName)
+	c.zk.Create(c.basePath, "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, "nodes"), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, c.config.WorkPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, "claim"), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.handoffRequestPath = c.config.HandoffPrefix + "-attempt"
+	c.handoffClaimPath = c.config.HandoffPrefix + "-claim"
+	c.zk.Create(path.Join(c.basePath, c.handoffRequestPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, c.handoffClaimPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
 	log.Println("Coordination paths created")
 }
 
@@ -153,6 +162,19 @@ func (c *Cluster) setupWatchers() (err error) {
 		c.zk.Close()
 		return
 	}
+	if c.handoffRequestKill, err = watchZKChildren(c.zk, path.Join(c.basePath, c.handoffRequestPath), c.handoffRequest, func(m *SafeMap) {
+		log.Printf("handoff requests updated: %s", c.handoffRequest.Dump())
+		c.getWork()
+		c.verifyWork()
+	}); err != nil {
+		c.zk.Close()
+	}
+	if c.handoffClaimKill, err = watchZKChildren(c.zk, path.Join(c.basePath, c.handoffClaimPath), c.handoffClaim, func(m *SafeMap) {
+		log.Printf("claim requests updated: %s", c.handoffClaim.Dump())
+	}); err != nil {
+		c.zk.Close()
+	}
+
 	log.Println("Watching coordination paths")
 	return
 }
@@ -169,16 +191,8 @@ func (c *Cluster) getWork() {
 	}
 
 	m := c.work.RangeLock()
-	// copy the claimed map so we can use it without blocking the claim
-	// update we'll see if we are successful in claiming any work.
-	claimed := c.claimed.RangeLock()
-	n := make(map[string]interface{})
-	for k, v := range claimed {
-		n[k] = v
-	}
-	c.claimed.RangeUnlock()
 	for work := range m {
-		if _, ok := n[work]; ok {
+		if c.claimed.Contains(work) {
 			continue
 		}
 		data, err := getDeserialize(c.zk, path.Join(base, work))
@@ -199,15 +213,23 @@ func (c *Cluster) tryClaimWork(workId string, data map[string]interface{}) {
 	}
 
 	if nodeId := c.workAssigned(workId); nodeId == "" || nodeId == c.config.NodeId {
-		c.claimWork(workId, data)
+		c.claimWork(workId, data, c.handoffRequest.Contains(workId))
 	}
 }
 
-func (c *Cluster) claimWork(workId string, data map[string]interface{}) (err error) {
-	claim := path.Join("/", c.clusterName, "claim", workId)
+func (c *Cluster) claimWork(workId string, data map[string]interface{}, handoffClaim bool) (err error) {
+	var claim string
+	if handoffClaim {
+		claim = path.Join(c.basePath, c.handoffRequestPath, workId)
+	} else {
+		claim = path.Join("/", c.clusterName, "claim", workId)
+	}
 	if _, err := c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
 		c.balancer.AddWork(workId)
 		c.startWork(workId, data)
+		if handoffClaim {
+			c.claimedHandoff.Put(workId, nil)
+		}
 	} else {
 		log.Printf("Could not claim %s: %v", workId, err)
 	}
@@ -224,7 +246,8 @@ func (c *Cluster) claimAssigned(workId string, data map[string]interface{}) {
 			// We already own the node
 			return
 		}
-		if err := c.claimWork(workId, data); err != nil {
+		if err := c.claimWork(workId, data, false); err != nil {
+			log.Printf("failed to claim assigned work %s, will retry", workId)
 			time.Sleep(time.Second)
 		}
 	}
@@ -234,6 +257,13 @@ func (c *Cluster) workOwner(workId string) (node string, err error) {
 	claim := path.Join("/", c.clusterName, "claim", workId)
 	node, _, err = c.zk.Get(claim)
 	return
+}
+
+func (c *Cluster) ownWork(workId string) bool {
+	if node, err := c.workOwner(workId); err == nil {
+		return node == c.config.NodeId
+	}
+	return false
 }
 
 func (c *Cluster) workAssigned(workId string) string {
@@ -257,7 +287,7 @@ func (c *Cluster) startWork(workId string, data map[string]interface{}) {
 func (c *Cluster) endWork(workId string) {
 	if c.owned.Get(workId) != nil {
 		// XXX Kill running routine here
-		if err := c.zk.Delete(path.Join("/", c.clusterName, "claim", workId), -1); err != nil {
+		if err := c.zk.Delete(path.Join(c.basePath, "claim", workId), -1); err != nil {
 			log.Printf("Could not release %s: %v", workId, err)
 			return
 		}
@@ -316,7 +346,39 @@ func (c *Cluster) finish() {
 }
 
 func (c *Cluster) tryHandoff(workId string) error {
+	// add work to handoff node
+	if !c.claimed.Contains(workId) {
+		return nil
+	}
+
+	if c.handoffRequest.Contains(workId) {
+		return nil
+	}
+
+	handoffPath := path.Join(c.basePath, c.handoffRequestPath, workId)
+	if _, err := c.zk.Create(handoffPath, "", 0, gozk.WorldACL(gozk.PERM_ALL)); err != nil {
+		if err.Code() == gozk.ZNODEEXISTS {
+			log.Printf("handoff node %s already exists", handoffPath)
+		} else {
+			return err
+		}
+	}
 	return nil
+}
+
+func (c *Cluster) completeHandoff(workId string) (err error) {
+	// XXX claim work and remove handoff claim entry
+	for {
+		claim := path.Join(c.basePath, "claim", workId)
+		if _, err = c.zk.Create(claim, c.config.NodeId, 0, gozk.WorldACL(gozk.PERM_ALL)); err == nil || c.ownWork(claim) {
+			// we have created out claim node, we can delete the handoff claim node
+			c.zk.Delete(path.Join(c.basePath, c.handoffClaimPath, workId), -1)
+			c.claimedHandoff.Delete(workId)
+		}
+		log.Printf("Could not complete handoff for %s: %v, will retry", workId, err)
+		time.Sleep(time.Second)
+	}
+	return
 }
 
 func (c *Cluster) rebalance() {
@@ -330,31 +392,14 @@ func (c *Cluster) rebalance() {
 
 	handoffList := c.balancer.HandoffList()
 	if len(handoffList) > 0 {
-		willTry := len(handoffList)
-		handoffComplete := make(chan byte)
 		for _, workId := range handoffList {
-			id := workId
-			go func() {
-				if err := c.tryHandoff(id); err == nil {
-					handoffComplete <- 1
-				} else {
-					handoffComplete <- 0
-				}
-			}()
-		}
-		failed := 0
-		done := 0
-		for complete := range handoffComplete {
-			if complete == 0 {
-				failed++
+			if err := c.tryHandoff(workId); err == nil {
+				log.Printf("Error on tryHandoff: %v", err)
 			}
-			done++
-			if done == willTry {
-				close(handoffComplete)
-			}
-		}
-		if failed > 0 {
-			log.Printf("failed to handoff %d work assignments", failed)
 		}
 	}
+}
+
+func (c *Cluster) ForceRebalance() {
+	c.rebalance()
 }
