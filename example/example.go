@@ -46,7 +46,7 @@ func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
 	data["example"] = l.nodeId
 	donut.CreateWork("example", zk, l.config, "work-"+l.nodeId, data)
 	go func() {
-		// only do this work for 10 seconds
+		// only do this work for 5 seconds
 		time.Sleep(5 * time.Second)
 		donut.CompleteWork("example", zk, l.config, "work-"+l.nodeId)
 	}()
