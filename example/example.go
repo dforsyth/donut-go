@@ -76,6 +76,12 @@ func (l *ExampleListener) EndWork(workId string) {
 	l.killers[workId] <- 0
 }
 
+func (l *ExampleListener) Information() map[string]interface{} {
+	information = make(map[string]interface{})
+	information["nodeid"] = l.config.NodeId
+	return information
+}
+
 func main() {
 	if len(os.Args) == 1 {
 		panic("no name arguments")

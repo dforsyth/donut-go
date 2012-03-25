@@ -96,6 +96,9 @@ func (c *Cluster) Join() /* int32 */ {
 		c.listener.OnJoin(zk)
 		c.setupWatchers()
 		atomic.StoreInt32(&c.state, StartedState)
+		if _, ok := c.listener.(MonitoredListener); ok {
+			c.startHTTP()
+		}
 		c.getWork()
 	case StartedState, DrainingState:
 		log.Fatalf("Tried to join with state StartedState or DrainingState")
@@ -402,4 +405,19 @@ func (c *Cluster) rebalance() {
 
 func (c *Cluster) ForceRebalance() {
 	c.rebalance()
+}
+
+func (c *Cluster) startHTTP() {
+	log.Println("startHTTP")
+
+	// InformationHandler
+	InformationHandler := func() {
+		information := c.listener.(MonitoredListener).Information()
+		_ = information
+	}
+	_ = InformationHandler
+}
+
+func (c *Cluster) endHTTP() {
+	log.Println("endHTTP")
 }

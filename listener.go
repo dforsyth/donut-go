@@ -10,3 +10,8 @@ type Listener interface {
 	StartWork(string, map[string]interface{})
 	EndWork(string)
 }
+
+type MonitoredListener interface {
+	Listener
+	Information() map[string]interface{}
+}
