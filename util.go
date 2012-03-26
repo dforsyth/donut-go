@@ -62,6 +62,16 @@ func (m *SafeMap) RangeUnlock() {
 	m.lk.RUnlock()
 }
 
+func (m *SafeMap) GetCopy() map[string]interface{} {
+	m.lk.RLock()
+	defer m.lk.RUnlock()
+	_m := make(map[string]interface{})
+	for k, v := range m._map {
+		_m[k] = v
+	}
+	return _m
+}
+
 func (m *SafeMap) Clear() {
 	m.lk.Lock()
 	defer m.lk.Unlock()
