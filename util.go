@@ -96,7 +96,7 @@ func watchZKChildren(zk *gozk.ZooKeeper, path string, children *SafeMap, onChang
 		m[node] = nil
 	}
 	children.RangeUnlock()
-	kill := make(chan byte)
+	kill := make(chan byte, 1)
 	go func() {
 		defer close(kill)
 		var nodes []string
