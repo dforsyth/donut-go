@@ -173,6 +173,8 @@ func CreateWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId s
 	p := path.Join("/", clusterName, config.WorkPath, workId)
 	if err = serializeCreate(zk, p, data); err != nil {
 		log.Printf("Failed to create work %s (%s): %v", workId, p, err)
+	} else {
+		log.Printf("Created work %s", p)
 	}
 	return
 }

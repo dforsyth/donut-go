@@ -161,7 +161,7 @@ func (c *Cluster) setupWatchers() (err error) {
 		c.getWork()
 		c.verifyWork()
 	}); err != nil {
-		log.Printf("error setting up work watcher: %v", err)
+		log.Printf("error setting up claim watcher: %v", err)
 		c.zk.Close()
 		return
 	}
@@ -228,13 +228,14 @@ func (c *Cluster) claimWork(workId string, data map[string]interface{}, handoffC
 		claim = path.Join("/", c.clusterName, "claim", workId)
 	}
 	if _, err := c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
+		log.Printf("Claimed %s with %s", workId, claim)
 		c.balancer.AddWork(workId)
 		c.startWork(workId, data)
 		if handoffClaim {
 			c.claimedHandoff.Put(workId, nil)
 		}
 	} else {
-		log.Printf("Could not claim %s: %v", workId, err)
+		log.Printf("Could not claim %s with %s: %v", workId, claim, err)
 	}
 	return
 }
