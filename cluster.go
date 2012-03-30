@@ -87,7 +87,7 @@ func (c *Cluster) Join() /* int32 */ {
 		}
 		ev := <-zkEv
 		if ev.State != gozk.STATE_CONNECTED {
-			panic("Failed to connect to Zookeeper")
+			log.Fatalf("Failed to connect to Zookeeper")
 		}
 		log.Printf("Node %s connected to ZooKeeper", c.config.NodeId)
 		c.zk, c.zkEv = zk, zkEv
@@ -95,13 +95,17 @@ func (c *Cluster) Join() /* int32 */ {
 		c.joinCluster()
 		c.listener.OnJoin(zk)
 		c.setupWatchers()
-		atomic.StoreInt32(&c.state, StartedState)
+		if !atomic.CompareAndSwapInt32(&c.state, NewState, StartedState) {
+			log.Fatalf("Could not move from NewState to StartedState: State is not NewState")
+		}
 		if _, ok := c.listener.(MonitoredListener); ok {
 			c.startHTTP()
 		}
 		c.getWork()
 	case StartedState, DrainingState:
 		log.Fatalf("Tried to join with state StartedState or DrainingState")
+	case ShutdownState:
+		// TODO
 	default:
 		panic("Unknown state")
 	}

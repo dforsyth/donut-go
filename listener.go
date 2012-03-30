@@ -13,5 +13,5 @@ type Listener interface {
 
 type MonitoredListener interface {
 	Listener
-	Information() map[string]interface{}
+	Information() map[string]interface{} // TODO: should be Marshaler?
 }
