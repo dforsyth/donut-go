@@ -284,6 +284,8 @@ func (c *Cluster) workAssigned(workId string) string {
 	return ""
 }
 
+// TODO: make the assignment field a list instead of a single string, so there are multiple candidates for work
+
 func (c *Cluster) startWork(workId string, data map[string]interface{}) {
 	c.owned.Put(workId, data)
 	// start listener work in a goroutine
