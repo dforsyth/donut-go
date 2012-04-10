@@ -1,8 +1,11 @@
 package donut
 
 import (
+	"encoding/json"
 	"gozk"
 	"log"
+	"net"
+	"net/http"
 	"path"
 	"sync/atomic"
 	"time"
@@ -98,8 +101,8 @@ func (c *Cluster) Join() /* int32 */ {
 		if !atomic.CompareAndSwapInt32(&c.state, NewState, StartedState) {
 			log.Fatalf("Could not move from NewState to StartedState: State is not NewState")
 		}
-		if _, ok := c.listener.(MonitoredListener); ok {
-			c.startHTTP()
+		if l, ok := c.listener.(MonitoredListener); ok {
+			go startHTTP(l)
 		}
 		c.getWork()
 	case StartedState, DrainingState:
@@ -414,17 +417,17 @@ func (c *Cluster) ForceRebalance() {
 	c.rebalance()
 }
 
-func (c *Cluster) startHTTP() {
-	log.Println("startHTTP")
-
-	// InformationHandler
-	InformationHandler := func() {
-		information := c.listener.(MonitoredListener).Information()
-		_ = information
-	}
-	_ = InformationHandler
-}
-
-func (c *Cluster) endHTTP() {
-	log.Println("endHTTP")
+func startHTTP(l MonitoredListener) {
+	http.HandleFunc("/information", func(w http.ResponseWriter, r *http.Request) {
+		information := l.Information()
+		enc, err := json.Marshal(information)
+		if err != nil {
+			log.Printf("Could not encode data for information request")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Write(enc)
+	})
+	log.Println("starting http server")
+	log.Fatal(http.ListenAndServe(net.JoinHostPort(l.APIHost(), l.APIPort()), nil))
 }

@@ -14,4 +14,6 @@ type Listener interface {
 type MonitoredListener interface {
 	Listener
 	Information() map[string]interface{} // TODO: should be Marshaler?
+	APIHost() string
+	APIPort() string
 }
