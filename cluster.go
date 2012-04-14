@@ -2,6 +2,7 @@ package donut
 
 import (
 	"encoding/json"
+	"errors"
 	"gozk"
 	"log"
 	"net"
@@ -19,17 +20,19 @@ const (
 )
 
 type Config struct {
-	NodeId        string
-	Servers       string
-	Timeout       int64
-	WorkPath      string
-	HandoffPrefix string
+	NodeId            string
+	Servers           string
+	Timeout           int64
+	WorkPath          string
+	HandoffPrefix     string
+	RebalanceInterval time.Duration
 }
 
 func NewConfig() *Config {
 	return &Config{
-		WorkPath:      "work",
-		HandoffPrefix: "handoff",
+		WorkPath:          "work",
+		HandoffPrefix:     "handoff",
+		RebalanceInterval: time.Second * 15,
 	}
 }
 
@@ -80,17 +83,17 @@ func (c *Cluster) ZKClient() *gozk.ZooKeeper {
 	return c.zk
 }
 
-func (c *Cluster) Join() /* int32 */ {
+func (c *Cluster) Join() error {
 	// log.Println("Join...")
 	switch atomic.LoadInt32(&c.state) {
 	case NewState /*, ShutdownState */ :
 		zk, zkEv, err := gozk.Init(c.config.Servers, c.config.Timeout)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		ev := <-zkEv
 		if ev.State != gozk.STATE_CONNECTED {
-			log.Fatalf("Failed to connect to Zookeeper")
+			return errors.New("Failed to connect to Zookeeper")
 		}
 		log.Printf("Node %s connected to ZooKeeper", c.config.NodeId)
 		c.zk, c.zkEv = zk, zkEv
@@ -106,13 +109,20 @@ func (c *Cluster) Join() /* int32 */ {
 		}
 		c.getWork()
 	case StartedState, DrainingState:
-		log.Fatalf("Tried to join with state StartedState or DrainingState")
+		return errors.New("Tried to join with state StartedState or DrainingState")
 	case ShutdownState:
 		// TODO
 	default:
 		panic("Unknown state")
 	}
-	// return atomic.LoadInt32(&c.state)
+	c.balancer.Init(c.listener)
+	go func() {
+		for {
+			<-time.After(c.config.RebalanceInterval)
+			c.rebalance()
+		}
+	}()
+	return nil
 }
 
 func (c *Cluster) createPaths() {
