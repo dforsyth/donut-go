@@ -8,29 +8,6 @@ import (
 	"time"
 )
 
-type DumbBalancer struct {
-}
-
-func (*DumbBalancer) Init(l donut.Listener) {
-
-}
-
-func (*DumbBalancer) AddWork(id string) {
-
-}
-
-func (*DumbBalancer) RemoveWork(id string) {
-
-}
-
-func (*DumbBalancer) CanClaim() bool {
-	return true
-}
-
-func (*DumbBalancer) HandoffList() []string {
-	return make([]string, 0)
-}
-
 type ExampleListener struct {
 	c       *donut.Cluster
 	nodeId  string
@@ -116,7 +93,7 @@ func main() {
 	log.Printf("node id is %s", node)
 	config.Timeout = 1 * 1e9
 
-	c := donut.NewCluster("example", config, &DumbBalancer{}, listener)
+	c := donut.NewCluster("example", config, &donut.DumbBalancer{}, listener)
 	listener.c = c
 	listener.config = config
 	c.Join()
