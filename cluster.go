@@ -83,6 +83,7 @@ func (c *Cluster) ZKClient() *gozk.ZooKeeper {
 	return c.zk
 }
 
+// Join joins the cluster *c is configured for.
 func (c *Cluster) Join() error {
 	// log.Println("Join...")
 	switch atomic.LoadInt32(&c.state) {
@@ -350,6 +351,7 @@ func (c *Cluster) verifyWork() {
 	}
 }
 
+// Shutdown ends all work running on *c and removes it from the cluster it is a member of
 func (c *Cluster) Shutdown() {
 	log.Printf("%s shutting down", c.config.NodeId)
 	atomic.StoreInt32(&c.state, ShutdownState)
