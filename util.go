@@ -94,6 +94,15 @@ func (m *SafeMap) Dump() string {
 	return rval
 }
 
+func (m *SafeMap) Keys() (keys []string) {
+	_m := m.RangeLock()
+	defer m.RangeUnlock()
+	for k := range _m {
+		keys = append(keys, k)
+	}
+	return
+}
+
 // Watch the children at path until a byte is sent on the returned channel
 // Uses the SafeMap more like a set, so you'll have to use Contains() for entries
 func watchZKChildren(zk *gozk.ZooKeeper, path string, children *SafeMap, onChange func(*SafeMap)) (chan byte, error) {

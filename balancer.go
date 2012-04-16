@@ -1,9 +1,7 @@
 package donut
 
 type Balancer interface {
-	Init(l Listener)
-	AddWork(string)
-	RemoveWork(string)
+	Init(c *Cluster)
 	CanClaim() bool
 	HandoffList() []string
 }
@@ -11,15 +9,7 @@ type Balancer interface {
 type DumbBalancer struct {
 }
 
-func (*DumbBalancer) Init(l Listener) {
-
-}
-
-func (*DumbBalancer) AddWork(id string) {
-
-}
-
-func (*DumbBalancer) RemoveWork(id string) {
+func (*DumbBalancer) Init(c *Cluster) {
 
 }
 

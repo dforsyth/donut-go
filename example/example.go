@@ -4,9 +4,49 @@ import (
 	"donut"
 	"gozk"
 	"log"
+	"math"
+	// "math/rand"
 	"os"
+	// "strconv"
 	"time"
 )
+
+type ExampleBalancer struct {
+	c *donut.Cluster
+}
+
+func (b *ExampleBalancer) Init(c *donut.Cluster) {
+	b.c = c
+}
+
+func (b *ExampleBalancer) maxOwn() int {
+	bal := float64(len(b.c.Work())) / float64(len(b.c.Nodes()))
+	return int(math.Ceil(bal))
+}
+
+func (b *ExampleBalancer) CanClaim() bool {
+	if len(b.c.Work()) <= 1 {
+		return len(b.c.Owned()) < len(b.c.Work())
+	}
+	return len(b.c.Owned()) < b.maxOwn()
+}
+
+func (b *ExampleBalancer) HandoffList() (handoff []string) {
+	owned := b.c.Owned()
+	give := len(owned) - b.maxOwn()
+	if give <= 0 {
+		return
+	}
+
+	for _, own := range owned {
+		handoff = append(handoff, own)
+		if len(handoff) == give {
+			break
+		}
+	}
+	log.Printf("handoff list length is %d", len(handoff))
+	return
+}
 
 type ExampleListener struct {
 	c       *donut.Cluster
@@ -22,13 +62,12 @@ func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
 	// Create some assigned work for this node as soon as it joins...
 	data := make(map[string]interface{})
 	// assign this work specifically to this node
-	data["example"] = l.nodeId
+	// data["example"] = l.nodeId
 	donut.CreateWork("example", zk, l.config, "work-"+l.nodeId, data)
 	go func() {
 		// only do this work for 5 seconds
-		time.Sleep(20 * time.Second)
+		time.Sleep(60 * time.Second)
 		donut.CompleteWork("example", zk, l.config, "work-"+l.nodeId)
-		l.jobs--
 	}()
 }
 
@@ -56,6 +95,7 @@ func (l *ExampleListener) StartWork(workId string, data map[string]interface{}) 
 func (l *ExampleListener) EndWork(workId string) {
 	log.Printf("Ending work on %s!", workId)
 	l.killers[workId] <- 0
+	l.jobs--
 }
 
 func (l *ExampleListener) Information() map[string]interface{} {
@@ -66,6 +106,7 @@ func (l *ExampleListener) Information() map[string]interface{} {
 	return information
 }
 
+/*
 func (l *ExampleListener) APIHost() string {
 	return ""
 }
@@ -73,6 +114,7 @@ func (l *ExampleListener) APIHost() string {
 func (l *ExampleListener) APIPort() string {
 	return "8000"
 }
+*/
 
 func main() {
 	if len(os.Args) == 1 {
@@ -93,7 +135,7 @@ func main() {
 	log.Printf("node id is %s", node)
 	config.Timeout = 1 * 1e9
 
-	c := donut.NewCluster("example", config, &donut.DumbBalancer{}, listener)
+	c := donut.NewCluster("example", config, &ExampleBalancer{}, listener)
 	listener.c = c
 	listener.config = config
 	c.Join()

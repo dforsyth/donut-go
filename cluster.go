@@ -32,7 +32,7 @@ func NewConfig() *Config {
 	return &Config{
 		WorkPath:          "work",
 		HandoffPrefix:     "handoff",
-		RebalanceInterval: time.Second * 15,
+		RebalanceInterval: time.Second * 5,
 	}
 }
 
@@ -48,6 +48,7 @@ type Cluster struct {
 	nodeKill, workKill, claimKill, handoffRequestKill, handoffClaimKill       chan byte
 	basePath, handoffRequestPath, handoffClaimPath                            string
 	// BasePath, NodePath, WorkPath, ClaimPath string
+	rebalanceKill chan byte
 }
 
 func NewCluster(clusterName string, config *Config, balancer Balancer, listener Listener) *Cluster {
@@ -60,6 +61,7 @@ func NewCluster(clusterName string, config *Config, balancer Balancer, listener 
 		owned:          NewSafeMap(nil),
 		handoffRequest: NewSafeMap(nil),
 		handoffClaim:   NewSafeMap(nil),
+		claimedHandoff: NewSafeMap(nil),
 		listener:       listener,
 		state:          NewState,
 		balancer:       balancer,
@@ -70,13 +72,20 @@ func (c *Cluster) Name() string {
 	return c.clusterName
 }
 
-func (c *Cluster) Nodes() (nodes []string) {
-	m := c.nodes.RangeLock()
-	defer c.nodes.RangeUnlock()
-	for k := range m {
-		nodes = append(nodes, k)
-	}
-	return
+func (c *Cluster) Nodes() []string {
+	return c.nodes.Keys()
+}
+
+func (c *Cluster) Work() []string {
+	return c.work.Keys()
+}
+
+func (c *Cluster) Claimed() []string {
+	return c.claimed.Keys()
+}
+
+func (c *Cluster) Owned() []string {
+	return c.owned.Keys()
 }
 
 func (c *Cluster) ZKClient() *gozk.ZooKeeper {
@@ -108,7 +117,6 @@ func (c *Cluster) Join() error {
 		if l, ok := c.listener.(MonitoredListener); ok {
 			go startHTTP(l)
 		}
-		c.getWork()
 	case StartedState, DrainingState:
 		return errors.New("Tried to join with state StartedState or DrainingState")
 	case ShutdownState:
@@ -116,13 +124,20 @@ func (c *Cluster) Join() error {
 	default:
 		panic("Unknown state")
 	}
-	c.balancer.Init(c.listener)
+
+	c.balancer.Init(c)
 	go func() {
+		c.rebalanceKill = make(chan byte)
 		for {
-			<-time.After(c.config.RebalanceInterval)
-			c.rebalance()
+			select {
+			case <-c.rebalanceKill:
+				return
+			case <-time.After(c.config.RebalanceInterval):
+				c.rebalance()
+			}
 		}
 	}()
+	c.getWork()
 	return nil
 }
 
@@ -157,7 +172,7 @@ func (c *Cluster) setupWatchers() (err error) {
 	base := path.Join("/", c.clusterName)
 	// XXX do zk.Close() here to clean up the watchers
 	if c.nodeKill, err = watchZKChildren(c.zk, path.Join(base, "nodes"), c.nodes, func(m *SafeMap) {
-		log.Printf("nodes updated: %s", c.nodes.Dump())
+		log.Printf("nodes updated:\n%s", c.nodes.Dump())
 		c.getWork()
 		c.verifyWork()
 	}); err != nil {
@@ -166,7 +181,7 @@ func (c *Cluster) setupWatchers() (err error) {
 	}
 	log.Printf("out of node watch")
 	if c.workKill, err = watchZKChildren(c.zk, path.Join(base, c.config.WorkPath), c.work, func(m *SafeMap) {
-		log.Printf("work updated: %s", c.work.Dump())
+		log.Printf("work updated:\n%s", c.work.Dump())
 		c.getWork()
 		c.verifyWork()
 	}); err != nil {
@@ -175,7 +190,7 @@ func (c *Cluster) setupWatchers() (err error) {
 		return
 	}
 	if c.claimKill, err = watchZKChildren(c.zk, path.Join(base, "claim"), c.claimed, func(m *SafeMap) {
-		log.Printf("claim updated: %s", c.claimed.Dump())
+		log.Printf("claim updated:\n%s", c.claimed.Dump())
 		c.getWork()
 		c.verifyWork()
 	}); err != nil {
@@ -184,14 +199,15 @@ func (c *Cluster) setupWatchers() (err error) {
 		return
 	}
 	if c.handoffRequestKill, err = watchZKChildren(c.zk, path.Join(c.basePath, c.handoffRequestPath), c.handoffRequest, func(m *SafeMap) {
-		log.Printf("handoff requests updated: %s", c.handoffRequest.Dump())
+		log.Printf("handoff requests updated:\n%s", c.handoffRequest.Dump())
 		c.getWork()
 		c.verifyWork()
 	}); err != nil {
 		c.zk.Close()
 	}
 	if c.handoffClaimKill, err = watchZKChildren(c.zk, path.Join(c.basePath, c.handoffClaimPath), c.handoffClaim, func(m *SafeMap) {
-		log.Printf("claim requests updated: %s", c.handoffClaim.Dump())
+		log.Printf("claimed requests updated:\n%s", c.handoffClaim.Dump())
+		c.handleHandoff(m)
 	}); err != nil {
 		c.zk.Close()
 	}
@@ -207,25 +223,23 @@ func (c *Cluster) getWork() {
 
 	base := path.Join("/", c.clusterName, c.config.WorkPath)
 	if c.work.Len() == 0 {
-		log.Println("no work to be had")
 		return
 	}
 
 	m := c.work.RangeLock()
+	defer c.work.RangeUnlock()
 	for work := range m {
-		if c.claimed.Contains(work) {
+		if c.claimed.Contains(work) && !c.handoffRequest.Contains(work) {
 			continue
 		}
 		data, err := getDeserialize(c.zk, path.Join(base, work))
 		if err != nil {
-			// log.Printf("failed to get work: %v", err)
 			continue
 		}
 		if c.balancer.CanClaim() {
 			c.tryClaimWork(work, data)
 		}
 	}
-	c.work.RangeUnlock()
 }
 
 func (c *Cluster) tryClaimWork(workId string, data map[string]interface{}) {
@@ -241,17 +255,16 @@ func (c *Cluster) tryClaimWork(workId string, data map[string]interface{}) {
 func (c *Cluster) claimWork(workId string, data map[string]interface{}, handoffClaim bool) (err error) {
 	var claim string
 	if handoffClaim {
-		claim = path.Join(c.basePath, c.handoffRequestPath, workId)
+		claim = path.Join(c.basePath, c.handoffClaimPath, workId)
 	} else {
 		claim = path.Join("/", c.clusterName, "claim", workId)
 	}
 	if _, err := c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
 		log.Printf("Claimed %s with %s", workId, claim)
-		c.balancer.AddWork(workId)
-		c.startWork(workId, data)
 		if handoffClaim {
-			c.claimedHandoff.Put(workId, nil)
+			c.claimedHandoff.Put(workId, c.config.NodeId)
 		}
+		c.startWork(workId, data)
 	} else {
 		log.Printf("Could not claim %s with %s: %v", workId, claim, err)
 	}
@@ -311,11 +324,7 @@ func (c *Cluster) startWork(workId string, data map[string]interface{}) {
 func (c *Cluster) endWork(workId string) {
 	if c.owned.Get(workId) != nil {
 		// XXX Kill running routine here
-		if err := c.zk.Delete(path.Join(c.basePath, "claim", workId), -1); err != nil {
-			log.Printf("Could not release %s: %v", workId, err)
-			return
-		}
-		c.balancer.RemoveWork(workId)
+		c.zk.Delete(path.Join(c.basePath, "claim", workId), -1)
 		c.owned.Delete(workId)
 	}
 	c.listener.EndWork(workId)
@@ -334,13 +343,12 @@ func (c *Cluster) verifyWork() {
 		}
 		// fetch the workId info from zk again here because we might be stale
 		if nodeId := c.workAssigned(workId); nodeId != "" && nodeId != c.config.NodeId {
-			// log.Printf("%s is not assigned to this node", workId)
-			// XXX drop this work
+			log.Printf("Doing work %s that is assigned to %s", workId, nodeId)
 			toRelease = append(toRelease, workId)
 			continue
 		}
-		if nodeId, _, err := c.zk.Get(path.Join("/", c.clusterName, "claim", workId)); err == nil && nodeId != c.config.NodeId {
-			// log.Printf("we are doing work we shouldn't be for %s", workId)
+		if nodeId, _, err := c.zk.Get(path.Join("/", c.clusterName, "claim", workId)); err == nil && nodeId != c.config.NodeId && !c.claimedHandoff.Contains(workId) {
+			log.Printf("Doing work %s that is owned by %s", workId, nodeId)
 			toRelease = append(toRelease, workId)
 			continue
 		}
@@ -370,7 +378,23 @@ func (c *Cluster) finish() {
 	c.zk.Close()
 }
 
-func (c *Cluster) tryHandoff(workId string) error {
+func (c *Cluster) handleHandoff(handoffClaims *SafeMap) {
+	m := handoffClaims.RangeLock()
+	defer handoffClaims.RangeUnlock()
+	for k := range m {
+		if c.claimedHandoff.Contains(k) {
+			// complete the handoff
+			c.completeHandoffReceive(k)
+		} else if c.owned.Contains(k) {
+			if nodeId, _, err := c.zk.Get(path.Join(c.basePath, c.handoffClaimPath, k)); err == nil && nodeId != c.config.NodeId {
+				// relinquish this work to its new owner
+				c.completeHandoffGive(k)
+			}
+		}
+	}
+}
+
+func (c *Cluster) initiateHandoff(workId string) error {
 	// add work to handoff node
 	if !c.claimed.Contains(workId) {
 		return nil
@@ -381,32 +405,39 @@ func (c *Cluster) tryHandoff(workId string) error {
 	}
 
 	handoffPath := path.Join(c.basePath, c.handoffRequestPath, workId)
-	if _, err := c.zk.Create(handoffPath, "", 0, gozk.WorldACL(gozk.PERM_ALL)); err != nil {
-		if err.Code() == gozk.ZNODEEXISTS {
-			log.Printf("handoff node %s already exists", handoffPath)
-		} else {
-			return err
-		}
+	if _, err := c.zk.Create(handoffPath, "", gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err != nil {
+		log.Printf("Could not create handoff request for %s: %v", workId, err)
+		return err
 	}
 	return nil
 }
 
-func (c *Cluster) completeHandoff(workId string) (err error) {
+func (c *Cluster) completeHandoffReceive(workId string) {
 	// XXX claim work and remove handoff claim entry
+	log.Printf("Completing handoff receive for %s", workId)
+	var err error
 	for {
 		claim := path.Join(c.basePath, "claim", workId)
-		if _, err = c.zk.Create(claim, c.config.NodeId, 0, gozk.WorldACL(gozk.PERM_ALL)); err == nil || c.ownWork(claim) {
-			// we have created out claim node, we can delete the handoff claim node
+		if _, err = c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil || c.ownWork(claim) {
+			// we have created our claim node, we can delete the handoff claim node
 			c.zk.Delete(path.Join(c.basePath, c.handoffClaimPath, workId), -1)
 			c.claimedHandoff.Delete(workId)
+			break
 		}
 		log.Printf("Could not complete handoff for %s: %v, will retry", workId, err)
 		time.Sleep(time.Second)
 	}
-	return
+	log.Printf("Done with handoff receive for %s", workId)
+}
+
+func (c *Cluster) completeHandoffGive(workId string) {
+	log.Printf("Completing handoff give for %s", workId)
+	c.zk.Delete(path.Join(c.basePath, c.handoffRequestPath, workId), -1)
+	c.endWork(workId)
 }
 
 func (c *Cluster) rebalance() {
+	log.Println("Doing rebalance")
 	if atomic.LoadInt32(&c.state) == NewState {
 		return
 	}
@@ -418,8 +449,9 @@ func (c *Cluster) rebalance() {
 	handoffList := c.balancer.HandoffList()
 	if len(handoffList) > 0 {
 		for _, workId := range handoffList {
-			if err := c.tryHandoff(workId); err == nil {
-				log.Printf("Error on tryHandoff: %v", err)
+			log.Printf("Initiating handoff for %s", workId)
+			if err := c.initiateHandoff(workId); err != nil {
+				log.Printf("Error on initiateHandoff: %v", err)
 			}
 		}
 	}
@@ -440,6 +472,6 @@ func startHTTP(l MonitoredListener) {
 		}
 		w.Write(enc)
 	})
-	log.Println("starting http server")
+	log.Println("Starting http server")
 	log.Fatal(http.ListenAndServe(net.JoinHostPort(l.APIHost(), l.APIPort()), nil))
 }
