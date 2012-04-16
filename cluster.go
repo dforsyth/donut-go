@@ -262,7 +262,7 @@ func (c *Cluster) claimWork(workId string, data map[string]interface{}, handoffC
 	if _, err := c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
 		log.Printf("Claimed %s with %s", workId, claim)
 		if handoffClaim {
-			c.claimedHandoff.Put(workId, c.config.NodeId)
+			c.claimedHandoff.Put(workId, nil)
 		}
 		c.startWork(workId, data)
 	} else {
