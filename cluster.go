@@ -158,8 +158,8 @@ func (c *Cluster) joinCluster() {
 	var err error
 	path := path.Join("/", c.clusterName, "nodes", c.config.NodeId)
 	for {
-		// log.Printf("path is %s", path)
-		// XXX I should look at storing c.state in this path, for monitoring
+		// XXX Probaby want to store static information in here, like nodeid, api host and port, if it's
+		// a monitored listener or not, and maybe some other things.
 		if _, err = c.zk.Create(path, "", gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
 			return
 		}
