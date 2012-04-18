@@ -49,12 +49,12 @@ func (b *ExampleBalancer) HandoffList() (handoff []string) {
 }
 
 type ExampleListener struct {
-	c       *donut.Cluster
-	nodeId  string
-	killers map[string]chan byte
-	config  *donut.Config
-	dings   int
-	jobs    int
+	c                *donut.Cluster
+	killers          map[string]chan byte
+	config           *donut.Config
+	dings            int
+	jobs             int
+	apiHost, apiPort string
 }
 
 func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
@@ -62,12 +62,12 @@ func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
 	// Create some assigned work for this node as soon as it joins...
 	data := make(map[string]interface{})
 	// assign this work specifically to this node
-	// data["example"] = l.nodeId
-	donut.CreateWork("example", zk, l.config, "work-"+l.nodeId, data)
+	// data["example"] = l.config.NodeId
+	donut.CreateWork("example", zk, l.config, "work-"+l.config.NodeId, data)
 	go func() {
 		// only do this work for 5 seconds
 		time.Sleep(60 * time.Second)
-		donut.CompleteWork("example", zk, l.config, "work-"+l.nodeId)
+		donut.CompleteWork("example", zk, l.config, "work-"+l.config.NodeId)
 	}()
 }
 
@@ -106,33 +106,28 @@ func (l *ExampleListener) Information() map[string]interface{} {
 	return information
 }
 
-/*
 func (l *ExampleListener) APIHost() string {
-	return ""
+	return l.apiHost
 }
 
 func (l *ExampleListener) APIPort() string {
-	return "8000"
+	return l.apiPort
 }
-*/
 
 func main() {
-	if len(os.Args) == 1 {
-		panic("no name arguments")
-	}
-	node := "node"
-	for _, arg := range os.Args[1:] {
-		node += "-" + arg
+	if len(os.Args) < 4 {
+		panic("usage: example <nodeId> <apiHost> <apiPort>")
 	}
 	listener := &ExampleListener{
 		killers: make(map[string]chan byte),
-		nodeId:  node,
+		apiHost: os.Args[2],
+		apiPort: os.Args[3],
 	}
 	config := donut.NewConfig()
 
 	config.Servers = "localhost:50000"
-	config.NodeId = node
-	log.Printf("node id is %s", node)
+	config.NodeId = "node-" + os.Args[1]
+	log.Printf("node id is %s", config.NodeId)
 	config.Timeout = 1 * 1e9
 
 	c := donut.NewCluster("example", config, &ExampleBalancer{}, listener)

@@ -1,2 +1,1 @@
-Donut is a library for building clustered services in Go.  It is modeled after
-Boundary's Ordasity library.
+Donut is a library for building clustered services in Go.  It was originally modeled after Ordasity (http://github.com/boundary/ordasity).
