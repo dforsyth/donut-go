@@ -5,9 +5,7 @@ import (
 	"gozk"
 	"log"
 	"math"
-	// "math/rand"
 	"os"
-	// "strconv"
 	"time"
 )
 
