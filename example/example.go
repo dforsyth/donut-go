@@ -126,7 +126,6 @@ func main() {
 	config.Servers = "localhost:50000"
 	config.NodeId = "node-" + os.Args[1]
 	log.Printf("node id is %s", config.NodeId)
-	config.Timeout = 1 * 1e9
 
 	c := donut.NewCluster("example", config, &ExampleBalancer{}, listener)
 	listener.c = c

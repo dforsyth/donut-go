@@ -33,6 +33,7 @@ func NewConfig() *Config {
 		WorkPath:          "work",
 		HandoffPrefix:     "handoff",
 		RebalanceInterval: time.Second * 5,
+		Timeout:           1 * 1e9,
 	}
 }
 
