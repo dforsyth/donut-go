@@ -1,6 +1,6 @@
 Donut is a library for building clustered services in Go.  It was originally modeled after Ordasity (http://github.com/boundary/ordasity).
 
-== Example Service ==
+## Example Service
 
 	package main
 
