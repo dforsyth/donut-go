@@ -9,11 +9,13 @@ import (
 	"sync"
 )
 
+// A locked map
 type SafeMap struct {
 	_map map[string]interface{}
 	lk   sync.RWMutex
 }
 
+// Create a new SafeMap
 func NewSafeMap(initial map[string]interface{}) *SafeMap {
 	m := &SafeMap{
 		_map: make(map[string]interface{}),
@@ -24,12 +26,14 @@ func NewSafeMap(initial map[string]interface{}) *SafeMap {
 	return m
 }
 
+// Get a value from the map
 func (m *SafeMap) Get(key string) interface{} {
 	m.lk.RLock()
 	defer m.lk.RUnlock()
 	return m._map[key]
 }
 
+// Check whether a key exists in the map
 func (m *SafeMap) Contains(key string) bool {
 	m.lk.RLock()
 	defer m.lk.RUnlock()
@@ -37,6 +41,7 @@ func (m *SafeMap) Contains(key string) bool {
 	return ok
 }
 
+// Remove a key from the map
 func (m *SafeMap) Delete(key string) interface{} {
 	m.lk.Lock()
 	defer m.lk.Unlock()
@@ -45,6 +50,7 @@ func (m *SafeMap) Delete(key string) interface{} {
 	return v
 }
 
+// Put a key, value into the map
 func (m *SafeMap) Put(key string, value interface{}) interface{} {
 	m.lk.Lock()
 	defer m.lk.Unlock()
@@ -53,15 +59,18 @@ func (m *SafeMap) Put(key string, value interface{}) interface{} {
 	return old
 }
 
+// Take an extended lock over the map
 func (m *SafeMap) RangeLock() map[string]interface{} {
 	m.lk.RLock()
 	return m._map
 }
 
+// Release extended lock
 func (m *SafeMap) RangeUnlock() {
 	m.lk.RUnlock()
 }
 
+// Copy the map into a normal map
 func (m *SafeMap) GetCopy() map[string]interface{} {
 	m.lk.RLock()
 	defer m.lk.RUnlock()
@@ -72,18 +81,21 @@ func (m *SafeMap) GetCopy() map[string]interface{} {
 	return _m
 }
 
+// Clear th map
 func (m *SafeMap) Clear() {
 	m.lk.Lock()
 	defer m.lk.Unlock()
 	m._map = make(map[string]interface{})
 }
 
+// Get the size of the map
 func (m *SafeMap) Len() int {
 	m.lk.RLock()
 	defer m.lk.RUnlock()
 	return len(m._map)
 }
 
+// Dump the map as a string
 func (m *SafeMap) Dump() string {
 	m.lk.RLock()
 	defer m.lk.RUnlock()
@@ -94,6 +106,7 @@ func (m *SafeMap) Dump() string {
 	return rval
 }
 
+// List all keys in the map
 func (m *SafeMap) Keys() (keys []string) {
 	_m := m.RangeLock()
 	defer m.RangeUnlock()
@@ -178,6 +191,7 @@ func getDeserialize(zk *gozk.ZooKeeper, path string) (data map[string]interface{
 	return
 }
 
+// Create work in a cluster
 func CreateWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId string, data map[string]interface{}) (err error) {
 	p := path.Join("/", clusterName, config.WorkPath, workId)
 	if err = serializeCreate(zk, p, data); err != nil {
@@ -188,6 +202,7 @@ func CreateWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId s
 	return
 }
 
+// Remove work from a cluster
 func CompleteWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId string) {
 	p := path.Join("/", clusterName, config.WorkPath, workId)
 	zk.Delete(p, -1)
