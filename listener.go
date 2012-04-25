@@ -1,12 +1,12 @@
 package donut
 
 import (
-	"gozk"
+	"launchpad.net/gozk/zookeeper"
 )
 
 type Listener interface {
 	// Called when the listener joins a cluster
-	OnJoin(*gozk.ZooKeeper)
+	OnJoin(*zookeeper.Conn)
 	// Called when the listener leaved a cluster
 	OnLeave()
 	// Called when work is started

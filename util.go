@@ -3,7 +3,7 @@ package donut
 import (
 	"encoding/json"
 	"fmt"
-	"gozk"
+	"launchpad.net/gozk/zookeeper"
 	"log"
 	"path"
 	"sync"
@@ -118,7 +118,7 @@ func (m *SafeMap) Keys() (keys []string) {
 
 // Watch the children at path until a byte is sent on the returned channel
 // Uses the SafeMap more like a set, so you'll have to use Contains() for entries
-func watchZKChildren(zk *gozk.ZooKeeper, path string, children *SafeMap, onChange func(*SafeMap)) (chan byte, error) {
+func watchZKChildren(zk *zookeeper.Conn, path string, children *SafeMap, onChange func(*SafeMap)) (chan byte, error) {
 	initial, _, watch, err := zk.ChildrenW(path)
 	if err != nil {
 		return nil, err
@@ -171,16 +171,16 @@ func watchZKChildren(zk *gozk.ZooKeeper, path string, children *SafeMap, onChang
 	return kill, nil
 }
 
-func serializeCreate(zk *gozk.ZooKeeper, path string, data map[string]interface{}) (err error) {
+func serializeCreate(zk *zookeeper.Conn, path string, data map[string]interface{}) (err error) {
 	var e []byte
 	if e, err = json.Marshal(data); err != nil {
 		return
 	}
-	_, err = zk.Create(path, string(e), 0, gozk.WorldACL(gozk.PERM_ALL))
+	_, err = zk.Create(path, string(e), 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
 	return
 }
 
-func getDeserialize(zk *gozk.ZooKeeper, path string) (data map[string]interface{}, err error) {
+func getDeserialize(zk *zookeeper.Conn, path string) (data map[string]interface{}, err error) {
 	var e string
 	e, _, err = zk.Get(path)
 	if err != nil {
@@ -192,7 +192,7 @@ func getDeserialize(zk *gozk.ZooKeeper, path string) (data map[string]interface{
 }
 
 // Create work in a cluster
-func CreateWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId string, data map[string]interface{}) (err error) {
+func CreateWork(clusterName string, zk *zookeeper.Conn, config *Config, workId string, data map[string]interface{}) (err error) {
 	p := path.Join("/", clusterName, config.WorkPath, workId)
 	if err = serializeCreate(zk, p, data); err != nil {
 		log.Printf("Failed to create work %s (%s): %v", workId, p, err)
@@ -203,7 +203,7 @@ func CreateWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId s
 }
 
 // Remove work from a cluster
-func CompleteWork(clusterName string, zk *gozk.ZooKeeper, config *Config, workId string) {
+func CompleteWork(clusterName string, zk *zookeeper.Conn, config *Config, workId string) {
 	p := path.Join("/", clusterName, config.WorkPath, workId)
 	zk.Delete(p, -1)
 	log.Printf("Deleted work %s (%s)", workId, p)

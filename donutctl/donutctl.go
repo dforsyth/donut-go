@@ -2,20 +2,20 @@ package main
 
 import (
 	"donut"
-	"gozk"
-	"flag"
-	"path"
-	"os"
-	"io/ioutil"
 	"encoding/json"
-	"log"
 	"errors"
+	"flag"
+	"io/ioutil"
+	"launchpad.net/gozk/zookeeper"
+	"log"
+	"os"
+	"path"
 )
 
 type Ctl struct {
-	cfg *donut.Config
+	cfg    *donut.Config
 	action string
-	zk *gozk.ZooKeeper
+	zk     *zookeeper.Conn
 }
 
 func parseConfig(cfgPath string) (*donut.Config, error) {
@@ -31,12 +31,12 @@ func parseConfig(cfgPath string) (*donut.Config, error) {
 }
 
 func (c *Ctl) connectToZK() error {
-	zk, zkEv, err := gozk.Init(c.cfg.Servers, c.cfg.Timeout)
+	zk, zkEv, err := zookeeper.Dial(c.cfg.Servers, c.cfg.Timeout)
 	if err != nil {
 		return err
 	}
 	ev := <-zkEv
-	if ev.State != gozk.STATE_CONNECTED {
+	if ev.State != zookeeper.STATE_CONNECTED {
 		errors.New("Failed to connect to Zookeeper servers: " + c.cfg.Servers)
 	}
 	c.zk = zk
@@ -84,7 +84,7 @@ func main() {
 		return
 	}
 	if cfgPath == "" {
-		cfgPath = path.Join("~/donut/", cluster + ".cfg")
+		cfgPath = path.Join("~/donut/", cluster+".cfg")
 	}
 
 	var err error

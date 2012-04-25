@@ -3,7 +3,7 @@ package donut
 import (
 	"encoding/json"
 	"errors"
-	"gozk"
+	"launchpad.net/gozk/zookeeper"
 	"log"
 	"net"
 	"net/http"
@@ -22,7 +22,7 @@ const (
 type Config struct {
 	NodeId            string
 	Servers           string
-	Timeout           int64
+	Timeout           time.Duration
 	WorkPath          string
 	HandoffPrefix     string
 	RebalanceInterval time.Duration
@@ -33,7 +33,7 @@ func NewConfig() *Config {
 		WorkPath:          "work",
 		HandoffPrefix:     "handoff",
 		RebalanceInterval: time.Second * 5,
-		Timeout:           1 * 1e9,
+		Timeout:           time.Second,
 	}
 }
 
@@ -44,8 +44,8 @@ type Cluster struct {
 	listener                                                                  Listener
 	balancer                                                                  Balancer
 	state                                                                     int32
-	zk                                                                        *gozk.ZooKeeper
-	zkEv                                                                      chan gozk.Event
+	zk                                                                        *zookeeper.Conn
+	zkSession                                                                 <-chan zookeeper.Event
 	nodeKill, workKill, claimKill, handoffRequestKill, handoffClaimKill       chan byte
 	basePath, handoffRequestPath, handoffClaimPath                            string
 	// BasePath, NodePath, WorkPath, ClaimPath string
@@ -89,7 +89,7 @@ func (c *Cluster) Owned() []string {
 	return c.owned.Keys()
 }
 
-func (c *Cluster) ZKClient() *gozk.ZooKeeper {
+func (c *Cluster) ZKClient() *zookeeper.Conn {
 	return c.zk
 }
 
@@ -98,16 +98,16 @@ func (c *Cluster) Join() error {
 	// log.Println("Join...")
 	switch atomic.LoadInt32(&c.state) {
 	case NewState /*, ShutdownState */ :
-		zk, zkEv, err := gozk.Init(c.config.Servers, c.config.Timeout)
+		zk, session, err := zookeeper.Dial(c.config.Servers, c.config.Timeout)
 		if err != nil {
 			return err
 		}
-		ev := <-zkEv
-		if ev.State != gozk.STATE_CONNECTED {
+		ev := <-session
+		if ev.State != zookeeper.STATE_CONNECTED {
 			return errors.New("Failed to connect to Zookeeper")
 		}
 		log.Printf("Node %s connected to ZooKeeper", c.config.NodeId)
-		c.zk, c.zkEv = zk, zkEv
+		c.zk, c.zkSession = zk, session
 		c.createPaths()
 		c.joinCluster()
 		c.listener.OnJoin(zk)
@@ -144,14 +144,14 @@ func (c *Cluster) Join() error {
 
 func (c *Cluster) createPaths() {
 	c.basePath = path.Join("/", c.clusterName)
-	c.zk.Create(c.basePath, "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(c.basePath, "nodes"), "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(c.basePath, c.config.WorkPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(c.basePath, "claim"), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.zk.Create(c.basePath, "", 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, "nodes"), "", 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, c.config.WorkPath), "", 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, "claim"), "", 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
 	c.handoffRequestPath = c.config.HandoffPrefix + "-attempt"
 	c.handoffClaimPath = c.config.HandoffPrefix + "-claim"
-	c.zk.Create(path.Join(c.basePath, c.handoffRequestPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
-	c.zk.Create(path.Join(c.basePath, c.handoffClaimPath), "", 0, gozk.WorldACL(gozk.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, c.handoffRequestPath), "", 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
+	c.zk.Create(path.Join(c.basePath, c.handoffClaimPath), "", 0, zookeeper.WorldACL(zookeeper.PERM_ALL))
 	log.Println("Coordination paths created")
 }
 
@@ -161,7 +161,7 @@ func (c *Cluster) joinCluster() {
 	for {
 		// XXX Probaby want to store static information in here, like nodeid, api host and port, if it's
 		// a monitored listener or not, and maybe some other things.
-		if _, err = c.zk.Create(path, "", gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
+		if _, err = c.zk.Create(path, "", zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err == nil {
 			return
 		}
 		log.Printf("Attempt to join cluster failed: %v", err)
@@ -260,7 +260,7 @@ func (c *Cluster) claimWork(workId string, data map[string]interface{}, handoffC
 	} else {
 		claim = path.Join("/", c.clusterName, "claim", workId)
 	}
-	if _, err := c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil {
+	if _, err := c.zk.Create(claim, c.config.NodeId, zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err == nil {
 		log.Printf("Claimed %s with %s", workId, claim)
 		if handoffClaim {
 			c.claimedHandoff.Put(workId, nil)
@@ -406,7 +406,7 @@ func (c *Cluster) initiateHandoff(workId string) error {
 	}
 
 	handoffPath := path.Join(c.basePath, c.handoffRequestPath, workId)
-	if _, err := c.zk.Create(handoffPath, "", gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err != nil {
+	if _, err := c.zk.Create(handoffPath, "", zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err != nil {
 		log.Printf("Could not create handoff request for %s: %v", workId, err)
 		return err
 	}
@@ -419,7 +419,7 @@ func (c *Cluster) completeHandoffReceive(workId string) {
 	var err error
 	for {
 		claim := path.Join(c.basePath, "claim", workId)
-		if _, err = c.zk.Create(claim, c.config.NodeId, gozk.EPHEMERAL, gozk.WorldACL(gozk.PERM_ALL)); err == nil || c.ownWork(claim) {
+		if _, err = c.zk.Create(claim, c.config.NodeId, zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err == nil || c.ownWork(claim) {
 			// we have created our claim node, we can delete the handoff claim node
 			c.zk.Delete(path.Join(c.basePath, c.handoffClaimPath, workId), -1)
 			c.claimedHandoff.Delete(workId)

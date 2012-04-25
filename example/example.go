@@ -2,7 +2,7 @@ package main
 
 import (
 	"donut"
-	"gozk"
+	"launchpad.net/gozk/zookeeper"
 	"log"
 	"math"
 	"os"
@@ -55,7 +55,7 @@ type ExampleListener struct {
 	apiHost, apiPort string
 }
 
-func (l *ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
+func (l *ExampleListener) OnJoin(zk *zookeeper.Conn) {
 	log.Println("Joining!")
 	// Create some assigned work for this node as soon as it joins...
 	data := make(map[string]interface{})
