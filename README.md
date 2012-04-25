@@ -6,13 +6,13 @@ Donut is a library for building clustered services in Go.  It was originally mod
 
 	import (
 		"donut"
-		"gozk"
+		"launchpad.net/gozk/zookeeper"
 		"log"
 	)
 
 	type ExampleListener struct{}
 
-	func (*ExampleListener) OnJoin(zk *gozk.ZooKeeper) {
+	func (*ExampleListener) OnJoin(zk *zookeeper.Conn) {
 		log.Println("Joined the cluster!")
 	}
 
