@@ -30,3 +30,7 @@ Donut is a library for building clustered services in Go.  It was originally mod
 		c.Join()
 		<-make(chan byte)
 	}
+
+## Documentation
+
+http://go.pkgdoc.org/github.com/dforsyth/donut
