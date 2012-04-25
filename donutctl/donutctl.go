@@ -1,10 +1,10 @@
 package main
 
 import (
-	"donut"
 	"encoding/json"
 	"errors"
 	"flag"
+	"github.com/dforsyth/donut"
 	"io/ioutil"
 	"launchpad.net/gozk/zookeeper"
 	"log"
