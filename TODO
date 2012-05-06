@@ -1,4 +1,5 @@
 TODO:
+Group assignments
 Graceful cluster exiting
 Reconnect/session recycling
 Convert ZK code to a Coordinator interface
