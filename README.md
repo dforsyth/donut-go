@@ -5,7 +5,7 @@ Donut is a library for building clustered services in Go.  It was originally mod
 	package main
 
 	import (
-		"donut"
+		"github.com/dforsyth/donut"
 		"launchpad.net/gozk/zookeeper"
 		"log"
 	)
