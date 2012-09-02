@@ -180,7 +180,6 @@ func (c *Cluster) setupWatchers() (err error) {
 		log.Printf("error setting up nodes watcher: %v", err)
 		return
 	}
-	log.Printf("out of node watch")
 	if c.workKill, err = watchZKChildren(c.zk, path.Join(base, c.config.WorkPath), c.work, func(m *SafeMap) {
 		log.Printf("work updated:\n%s", c.work.Dump())
 		c.getWork()
