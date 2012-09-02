@@ -130,9 +130,6 @@ func main() {
 	c := donut.NewCluster("example", config, &ExampleBalancer{}, listener)
 	listener.c = c
 	listener.config = config
-	c.SetOnNodesChange(func(m *donut.SafeMap) {
-		log.Println("OnNodesChange")
-	})
 	c.Join("This is some node info")
 	<-make(chan byte)
 }
