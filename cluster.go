@@ -50,6 +50,7 @@ type Cluster struct {
 	basePath, handoffRequestPath, handoffClaimPath                            string
 	// BasePath, NodePath, WorkPath, ClaimPath string
 	rebalanceKill chan byte
+	onNodesChanged func(*SafeMap)
 }
 
 func NewCluster(clusterName string, config *Config, balancer Balancer, listener Listener) *Cluster {
@@ -169,6 +170,10 @@ func (c *Cluster) joinCluster(joinInfo string) {
 	}
 }
 
+func (c *Cluster) SetOnNodesChanged(fn func(*SafeMap)) {
+	c.onNodesChanged = fn
+}
+
 func (c *Cluster) setupWatchers() (err error) {
 	base := path.Join("/", c.clusterName)
 	// XXX do zk.Close() here to clean up the watchers
@@ -176,6 +181,9 @@ func (c *Cluster) setupWatchers() (err error) {
 		log.Printf("nodes updated:\n%s", c.nodes.Dump())
 		c.getWork()
 		c.verifyWork()
+		if c.onNodesChanged != nil {
+			c.onNodesChanged(m)
+		}
 	}); err != nil {
 		log.Printf("error setting up nodes watcher: %v", err)
 		return

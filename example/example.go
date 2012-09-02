@@ -128,6 +128,9 @@ func main() {
 	log.Printf("node id is %s", config.NodeId)
 
 	c := donut.NewCluster("example", config, &ExampleBalancer{}, listener)
+	c.SetOnNodesChanged(func(m *donut.SafeMap) {
+		log.Println("nodes changed")
+	})
 	listener.c = c
 	listener.config = config
 	c.Join("This is some node info")
