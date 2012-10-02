@@ -133,6 +133,6 @@ func main() {
 	})
 	listener.c = c
 	listener.config = config
-	c.Join("This is some node info")
+	c.Join()
 	<-make(chan byte)
 }
