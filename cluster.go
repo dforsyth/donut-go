@@ -94,7 +94,7 @@ func (c *Cluster) ZKClient() *zookeeper.Conn {
 }
 
 // Join joins the cluster *c is configured for.
-func (c *Cluster) Join(joinInfo string) error {
+func (c *Cluster) Join() error {
 	// log.Println("Join...")
 	switch atomic.LoadInt32(&c.state) {
 	case NewState /*, ShutdownState */ :
@@ -109,7 +109,7 @@ func (c *Cluster) Join(joinInfo string) error {
 		log.Printf("Node %s connected to ZooKeeper", c.config.NodeId)
 		c.zk, c.zkSession = zk, session
 		c.createPaths()
-		c.joinCluster(joinInfo)
+		c.joinCluster()
 		c.listener.OnJoin(zk)
 		c.setupWatchers()
 		if !atomic.CompareAndSwapInt32(&c.state, NewState, StartedState) {
@@ -155,13 +155,13 @@ func (c *Cluster) createPaths() {
 	log.Println("Coordination paths created")
 }
 
-func (c *Cluster) joinCluster(joinInfo string) {
+func (c *Cluster) joinCluster() {
 	var err error
 	path := path.Join("/", c.clusterName, "nodes", c.config.NodeId)
 	for {
 		// XXX Probaby want to store static information in here, like nodeid, api host and port, if it's
 		// a monitored listener or not, and maybe some other things.
-		if _, err = c.zk.Create(path, joinInfo, zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err == nil {
+		if _, err = c.zk.Create(path, "", zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err == nil {
 			return
 		}
 		log.Printf("Attempt to join cluster failed: %v", err)

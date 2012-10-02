@@ -130,6 +130,6 @@ func main() {
 	c := donut.NewCluster("example", config, &ExampleBalancer{}, listener)
 	listener.c = c
 	listener.config = config
-	c.Join("This is some node info")
+	c.Join()
 	<-make(chan byte)
 }

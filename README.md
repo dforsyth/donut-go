@@ -27,7 +27,7 @@ Donut is a library for building clustered services in Go.  It was originally mod
 		config.Servers = "localhost:50000"
 		config.NodeId = "node"
 		c := donut.NewCluster("example", config, &donut.DumbBalancer{}, &ExampleListener{})
-		c.Join("")
+		c.Join()
 		<-make(chan byte)
 	}
 
