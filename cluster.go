@@ -49,7 +49,7 @@ type Cluster struct {
 	nodeKill, workKill, claimKill, handoffRequestKill, handoffClaimKill       chan byte
 	basePath, handoffRequestPath, handoffClaimPath                            string
 	// BasePath, NodePath, WorkPath, ClaimPath string
-	rebalanceKill chan byte
+	rebalanceKill  chan byte
 	onNodesChanged func(*SafeMap)
 }
 

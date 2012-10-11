@@ -1,8 +1,8 @@
 package donut
 
 import (
-	"sync"
 	"math"
+	"sync"
 )
 
 type Balancer interface {
@@ -30,7 +30,7 @@ func (*DumbBalancer) HandoffList() []string {
 }
 
 type CountBalancer struct {
-	c *Cluster
+	c  *Cluster
 	lk sync.Mutex
 }
 
