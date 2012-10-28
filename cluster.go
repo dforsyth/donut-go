@@ -1,12 +1,9 @@
 package donut
 
 import (
-	"encoding/json"
 	"errors"
 	"launchpad.net/gozk/zookeeper"
 	"log"
-	"net"
-	"net/http"
 	"path"
 	"sync/atomic"
 	"time"
@@ -115,9 +112,6 @@ func (c *Cluster) Join() error {
 		if !atomic.CompareAndSwapInt32(&c.state, NewState, StartedState) {
 			log.Fatalf("Could not move from NewState to StartedState: State is not NewState")
 		}
-		if l, ok := c.listener.(MonitoredListener); ok {
-			go startHTTP(l)
-		}
 	case StartedState, DrainingState:
 		return errors.New("Tried to join with state StartedState or DrainingState")
 	case ShutdownState:
@@ -159,8 +153,6 @@ func (c *Cluster) joinCluster() {
 	var err error
 	path := path.Join("/", c.clusterName, "nodes", c.config.NodeId)
 	for {
-		// XXX Probaby want to store static information in here, like nodeid, api host and port, if it's
-		// a monitored listener or not, and maybe some other things.
 		if _, err = c.zk.Create(path, "", zookeeper.EPHEMERAL, zookeeper.WorldACL(zookeeper.PERM_ALL)); err == nil {
 			return
 		}
@@ -459,19 +451,4 @@ func (c *Cluster) rebalance() {
 
 func (c *Cluster) ForceRebalance() {
 	c.rebalance()
-}
-
-func startHTTP(l MonitoredListener) {
-	http.HandleFunc("/information", func(w http.ResponseWriter, r *http.Request) {
-		information := l.Information()
-		enc, err := json.Marshal(information)
-		if err != nil {
-			log.Printf("Could not encode data for information request")
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Write(enc)
-	})
-	log.Println("Starting http server")
-	log.Fatal(http.ListenAndServe(net.JoinHostPort(l.APIHost(), l.APIPort()), nil))
 }

@@ -14,13 +14,3 @@ type Listener interface {
 	// Called when work is stopped
 	EndWork(string)
 }
-
-type MonitoredListener interface {
-	Listener
-	// Returns a map of information
-	Information() map[string]interface{} // TODO: should be Marshaler?
-	// Host to access API
-	APIHost() string
-	// Port to access API
-	APIPort() string
-}
