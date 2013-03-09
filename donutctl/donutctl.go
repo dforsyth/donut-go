@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"strings"
 )
 
 type Ctl struct {
@@ -31,19 +32,20 @@ func parseConfig(cfgPath string) (*donut.Config, error) {
 }
 
 func (c *Ctl) connectToZK() error {
-	zk, zkEv, err := zookeeper.Dial(c.cfg.Servers, c.cfg.Timeout)
+	servers := strings.Join(c.cfg.Servers, ",")
+	zk, zkEv, err := zookeeper.Dial(servers, c.cfg.Timeout)
 	if err != nil {
 		return err
 	}
 	ev := <-zkEv
 	if ev.State != zookeeper.STATE_CONNECTED {
-		errors.New("Failed to connect to Zookeeper servers: " + c.cfg.Servers)
+		errors.New("Failed to connect to Zookeeper servers: " + servers)
 	}
 	c.zk = zk
 	return nil
 }
 
-func (c *Ctl) addWork(cluster, workId, assign string, data map[string]interface{}) error {
+func (c *Ctl) addTask(cluster, taskId, assign string, data map[string]interface{}) error {
 	m := make(map[string]interface{})
 	for k, v := range data {
 		if k == cluster {
@@ -55,11 +57,11 @@ func (c *Ctl) addWork(cluster, workId, assign string, data map[string]interface{
 		m[cluster] = assign
 	}
 
-	return donut.CreateWork(cluster, c.zk, c.cfg, workId, data)
+	return donut.CreateTask(cluster, c.zk, taskId, data)
 }
 
-func (c *Ctl) removeWork(cluster, workId string) error {
-	donut.CompleteWork(cluster, c.zk, c.cfg, workId)
+func (c *Ctl) removeTask(cluster, taskId string) error {
+	donut.CompleteTask(cluster, c.zk, taskId)
 	return nil
 }
 
@@ -68,18 +70,18 @@ func main() {
 		action: os.Args[1],
 	}
 
-	var cfgPath, cluster, workId, assign string
+	var cfgPath, cluster, taskId, assign string
 	flag.StringVar(&cfgPath, "config", "", "Path to configuration file (will fall back to ~/donut/<cluster>.cfg)")
 	flag.StringVar(&cluster, "cluster", "", "Cluster name (required)")
-	flag.StringVar(&workId, "workId", "", "Work ID (required)")
-	flag.StringVar(&assign, "assign", "", "Work assignee")
+	flag.StringVar(&taskId, "taskId", "", "Task ID (required)")
+	flag.StringVar(&assign, "assign", "", "Task assignee")
 	if cluster == "" {
 		log.Println("cluster is a required argument")
 		flag.Usage()
 		return
 	}
 	if cluster == "" {
-		log.Println("workId is a required argument")
+		log.Println("taskId is a required argument")
 		flag.Usage()
 		return
 	}
@@ -107,7 +109,7 @@ func main() {
 			log.Println(err)
 		}
 
-		if err = ctl.addWork(cluster, workId, assign, data); err != nil {
+		if err = ctl.addTask(cluster, taskId, assign, data); err != nil {
 			log.Println(err)
 		}
 	case "remove":
