@@ -43,7 +43,7 @@ func (c *Ctl) connectToZK() error {
 	return nil
 }
 
-func (c *Ctl) addWork(cluster, workId, assign string, data map[string]interface{}) error {
+func (c *Ctl) addTask(cluster, taskId, assign string, data map[string]interface{}) error {
 	m := make(map[string]interface{})
 	for k, v := range data {
 		if k == cluster {
@@ -55,11 +55,11 @@ func (c *Ctl) addWork(cluster, workId, assign string, data map[string]interface{
 		m[cluster] = assign
 	}
 
-	return donut.CreateWork(cluster, c.zk, c.cfg, workId, data)
+	return donut.CreateTask(cluster, c.zk, c.cfg, taskId, data)
 }
 
-func (c *Ctl) removeWork(cluster, workId string) error {
-	donut.CompleteWork(cluster, c.zk, c.cfg, workId)
+func (c *Ctl) removeTask(cluster, taskId string) error {
+	donut.CompleteTask(cluster, c.zk, c.cfg, taskId)
 	return nil
 }
 
@@ -68,18 +68,18 @@ func main() {
 		action: os.Args[1],
 	}
 
-	var cfgPath, cluster, workId, assign string
+	var cfgPath, cluster, taskId, assign string
 	flag.StringVar(&cfgPath, "config", "", "Path to configuration file (will fall back to ~/donut/<cluster>.cfg)")
 	flag.StringVar(&cluster, "cluster", "", "Cluster name (required)")
-	flag.StringVar(&workId, "workId", "", "Work ID (required)")
-	flag.StringVar(&assign, "assign", "", "Work assignee")
+	flag.StringVar(&taskId, "taskId", "", "Task ID (required)")
+	flag.StringVar(&assign, "assign", "", "Task assignee")
 	if cluster == "" {
 		log.Println("cluster is a required argument")
 		flag.Usage()
 		return
 	}
 	if cluster == "" {
-		log.Println("workId is a required argument")
+		log.Println("taskId is a required argument")
 		flag.Usage()
 		return
 	}
@@ -107,7 +107,7 @@ func main() {
 			log.Println(err)
 		}
 
-		if err = ctl.addWork(cluster, workId, assign, data); err != nil {
+		if err = ctl.addTask(cluster, taskId, assign, data); err != nil {
 			log.Println(err)
 		}
 	case "remove":
