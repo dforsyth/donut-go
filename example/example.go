@@ -18,13 +18,13 @@ func (b *ExampleBalancer) Init(c *donut.Cluster) {
 }
 
 func (b *ExampleBalancer) maxOwn() int {
-	bal := float64(len(b.c.Work())) / float64(len(b.c.Nodes()))
+	bal := float64(len(b.c.Tasks())) / float64(len(b.c.Nodes()))
 	return int(math.Ceil(bal))
 }
 
 func (b *ExampleBalancer) CanClaim() bool {
-	if len(b.c.Work()) <= 1 {
-		return len(b.c.Owned()) < len(b.c.Work())
+	if len(b.c.Tasks()) <= 1 {
+		return len(b.c.Owned()) < len(b.c.Tasks())
 	}
 	return len(b.c.Owned()) < b.maxOwn()
 }
@@ -57,15 +57,15 @@ type ExampleListener struct {
 
 func (l *ExampleListener) OnJoin(zk *zookeeper.Conn) {
 	log.Println("Joining!")
-	// Create some assigned work for this node as soon as it joins...
+	// Create an assigned task for this node as soon as it joins...
 	data := make(map[string]interface{})
-	// assign this work specifically to this node
+	// assign this task specifically to this node
 	// data["example"] = l.config.NodeId
-	donut.CreateWork("example", zk, l.config, "work-"+l.config.NodeId, data)
+	donut.CreateTask("example", zk, l.config, "task-"+l.config.NodeId, data)
 	go func() {
-		// only do this work for 5 seconds
+		// only do this task for 5 seconds
 		time.Sleep(60 * time.Second)
-		donut.CompleteWork("example", zk, l.config, "work-"+l.config.NodeId)
+		donut.CompleteTask("example", zk, l.config, "task-"+l.config.NodeId)
 	}()
 }
 
@@ -73,26 +73,26 @@ func (l *ExampleListener) OnLeave() {
 	log.Println("Leaving!")
 }
 
-func (l *ExampleListener) StartWork(workId string, data map[string]interface{}) {
-	log.Printf("Starting work on %s!", workId)
-	l.killers[workId] = make(chan byte)
+func (l *ExampleListener) StartTask(taskId string, data map[string]interface{}) {
+	log.Printf("Starting task %s!", taskId)
+	l.killers[taskId] = make(chan byte)
 	l.jobs++
 	for {
 		select {
-		case <-l.killers[workId]:
-			log.Printf("%s killed!", workId)
+		case <-l.killers[taskId]:
+			log.Printf("%s killed!", taskId)
 			return
 		default:
 		}
-		log.Printf("ding %s!", workId)
+		log.Printf("ding %s!", taskId)
 		l.dings++
 		time.Sleep(time.Second)
 	}
 }
 
-func (l *ExampleListener) EndWork(workId string) {
-	log.Printf("Ending work on %s!", workId)
-	l.killers[workId] <- 0
+func (l *ExampleListener) EndTask(taskId string) {
+	log.Printf("Ending task %s!", taskId)
+	l.killers[taskId] <- 0
 	l.jobs--
 }
 
