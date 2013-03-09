@@ -191,20 +191,20 @@ func getDeserialize(zk *zookeeper.Conn, path string) (data map[string]interface{
 	return
 }
 
-// Create work in a cluster
-func CreateWork(clusterName string, zk *zookeeper.Conn, config *Config, workId string, data map[string]interface{}) (err error) {
-	p := path.Join("/", clusterName, config.WorkPath, workId)
+// Create a task in a cluster
+func CreateTask(clusterName string, zk *zookeeper.Conn, config *Config, taskId string, data map[string]interface{}) (err error) {
+	p := path.Join("/", clusterName, config.TasksPath, taskId)
 	if err = serializeCreate(zk, p, data); err != nil {
-		log.Printf("Failed to create work %s (%s): %v", workId, p, err)
+		log.Printf("Failed to create task %s (%s): %v", taskId, p, err)
 	} else {
-		log.Printf("Created work %s", p)
+		log.Printf("Created task %s", p)
 	}
 	return
 }
 
-// Remove work from a cluster
-func CompleteWork(clusterName string, zk *zookeeper.Conn, config *Config, workId string) {
-	p := path.Join("/", clusterName, config.WorkPath, workId)
+// Remove a task from a cluster
+func CompleteTask(clusterName string, zk *zookeeper.Conn, config *Config, taskId string) {
+	p := path.Join("/", clusterName, config.TasksPath, taskId)
 	zk.Delete(p, -1)
-	log.Printf("Deleted work %s (%s)", workId, p)
+	log.Printf("Deleted task %s (%s)", taskId, p)
 }

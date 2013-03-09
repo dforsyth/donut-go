@@ -9,8 +9,8 @@ type Listener interface {
 	OnJoin(*zookeeper.Conn)
 	// Called when the listener leaved a cluster
 	OnLeave()
-	// Called when work is started
-	StartWork(string, map[string]interface{})
-	// Called when work is stopped
-	EndWork(string)
+	// Called when a task is started
+	StartTask(string, map[string]interface{})
+	// Called when a task is stopped
+	EndTask(string)
 }
