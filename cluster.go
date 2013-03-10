@@ -35,16 +35,16 @@ func NewConfig() *Config {
 }
 
 type Cluster struct {
-	clusterName                                                               string
-	config                                                                    *Config
+	clusterName                                                                string
+	config                                                                     *Config
 	nodes, tasks, claimed, owned, handoffRequest, handoffClaim, claimedHandoff *SafeMap
-	listener                                                                  Listener
-	balancer                                                                  Balancer
-	state                                                                     int32
-	zk                                                                        *zookeeper.Conn
-	zkSession                                                                 <-chan zookeeper.Event
+	listener                                                                   Listener
+	balancer                                                                   Balancer
+	state                                                                      int32
+	zk                                                                         *zookeeper.Conn
+	zkSession                                                                  <-chan zookeeper.Event
 	nodeKill, tasksKill, claimKill, handoffRequestKill, handoffClaimKill       chan byte
-	basePath, handoffRequestPath, handoffClaimPath                            string
+	basePath, handoffRequestPath, handoffClaimPath                             string
 	// BasePath, NodePath, TasksPath, ClaimPath string
 	rebalanceKill chan byte
 }
@@ -54,7 +54,7 @@ func NewCluster(clusterName string, config *Config, balancer Balancer, listener 
 		clusterName:    clusterName,
 		config:         config,
 		nodes:          NewSafeMap(nil),
-		tasks:           NewSafeMap(nil),
+		tasks:          NewSafeMap(nil),
 		claimed:        NewSafeMap(nil),
 		owned:          NewSafeMap(nil),
 		handoffRequest: NewSafeMap(nil),
