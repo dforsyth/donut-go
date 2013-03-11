@@ -35,16 +35,23 @@ func NewConfig() *Config {
 }
 
 type Cluster struct {
-	clusterName                                                                string
-	config                                                                     *Config
-	nodes, tasks, claimed, owned, handoffRequest, handoffClaim, claimedHandoff *SafeMap
-	listener                                                                   Listener
-	balancer                                                                   Balancer
-	state                                                                      int32
-	zk                                                                         *zookeeper.Conn
-	zkSession                                                                  <-chan zookeeper.Event
-	nodeKill, tasksKill, claimKill, handoffRequestKill, handoffClaimKill       chan byte
-	basePath, handoffRequestPath, handoffClaimPath                             string
+	clusterName        string
+	config             *Config
+	nodes              *ZKMap
+	tasks              *ZKMap
+	claimed            *ZKMap
+	owned              *SafeMap
+	handoffRequest     *ZKMap
+	handoffClaim       *ZKMap
+	claimedHandoff     *SafeMap
+	listener           Listener
+	balancer           Balancer
+	state              int32
+	zk                 *zookeeper.Conn
+	zkSession          <-chan zookeeper.Event
+	basePath           string
+	handoffRequestPath string
+	handoffClaimPath   string
 	// BasePath, NodePath, TasksPath, ClaimPath string
 	rebalanceKill chan byte
 }
@@ -53,12 +60,7 @@ func NewCluster(clusterName string, config *Config, balancer Balancer, listener 
 	return &Cluster{
 		clusterName:    clusterName,
 		config:         config,
-		nodes:          NewSafeMap(nil),
-		tasks:          NewSafeMap(nil),
-		claimed:        NewSafeMap(nil),
 		owned:          NewSafeMap(nil),
-		handoffRequest: NewSafeMap(nil),
-		handoffClaim:   NewSafeMap(nil),
 		claimedHandoff: NewSafeMap(nil),
 		listener:       listener,
 		state:          NewState,
@@ -71,15 +73,15 @@ func (c *Cluster) Name() string {
 }
 
 func (c *Cluster) Nodes() []string {
-	return c.nodes.Keys()
+	return c.nodes._m.Keys()
 }
 
 func (c *Cluster) Tasks() []string {
-	return c.tasks.Keys()
+	return c.tasks._m.Keys()
 }
 
 func (c *Cluster) Claimed() []string {
-	return c.claimed.Keys()
+	return c.claimed._m.Keys()
 }
 
 func (c *Cluster) Owned() []string {
@@ -163,45 +165,40 @@ func (c *Cluster) joinCluster() {
 
 func (c *Cluster) setupWatchers() (err error) {
 	base := path.Join("/", c.clusterName)
-	// XXX do zk.Close() here to clean up the watchers
-	if c.nodeKill, err = watchZKChildren(c.zk, path.Join(base, "nodes"), c.nodes, func(m *SafeMap) {
-		log.Printf("nodes updated:\n%s", c.nodes.Dump())
+
+	if c.nodes, err = NewZKMap(c.zk, path.Join(base, "nodes"), func(m *ZKMap) {
 		c.getTasks()
 		c.verifyTasks()
 	}); err != nil {
-		log.Printf("error setting up nodes watcher: %v", err)
-		return
+		panic(err)
 	}
-	if c.tasksKill, err = watchZKChildren(c.zk, path.Join(base, c.config.TasksPath), c.tasks, func(m *SafeMap) {
-		log.Printf("tasks updated:\n%s", c.tasks.Dump())
+
+	if c.tasks, err = NewZKMap(c.zk, path.Join(base, c.config.TasksPath), func(m *ZKMap) {
 		c.getTasks()
 		c.verifyTasks()
 	}); err != nil {
-		log.Printf("error setting up tasks watcher: %v", err)
-		c.zk.Close()
-		return
+		panic(err)
 	}
-	if c.claimKill, err = watchZKChildren(c.zk, path.Join(base, "claim"), c.claimed, func(m *SafeMap) {
-		log.Printf("claim updated:\n%s", c.claimed.Dump())
+
+	if c.claimed, err = NewZKMap(c.zk, path.Join(base, "claim"), func(m *ZKMap) {
 		c.getTasks()
 		c.verifyTasks()
 	}); err != nil {
-		log.Printf("error setting up claim watcher: %v", err)
-		c.zk.Close()
-		return
+		panic(err)
 	}
-	if c.handoffRequestKill, err = watchZKChildren(c.zk, path.Join(c.basePath, c.handoffRequestPath), c.handoffRequest, func(m *SafeMap) {
-		log.Printf("handoff requests updated:\n%s", c.handoffRequest.Dump())
+
+	if c.handoffRequest, err = NewZKMap(c.zk, path.Join(base, c.handoffRequestPath), func(m *ZKMap) {
 		c.getTasks()
 		c.verifyTasks()
 	}); err != nil {
-		c.zk.Close()
+		panic(err)
 	}
-	if c.handoffClaimKill, err = watchZKChildren(c.zk, path.Join(c.basePath, c.handoffClaimPath), c.handoffClaim, func(m *SafeMap) {
-		log.Printf("claimed requests updated:\n%s", c.handoffClaim.Dump())
-		c.handleHandoff(m)
+
+	if c.handoffClaim, err = NewZKMap(c.zk, path.Join(base, c.handoffClaimPath), func(m *ZKMap) {
+		c.getTasks()
+		c.verifyTasks()
 	}); err != nil {
-		c.zk.Close()
+		panic(err)
 	}
 
 	log.Println("Watching coordination paths")
@@ -214,14 +211,14 @@ func (c *Cluster) getTasks() {
 	}
 
 	base := path.Join("/", c.clusterName, c.config.TasksPath)
-	if c.tasks.Len() == 0 {
+	if c.tasks._m.Len() == 0 {
 		return
 	}
 
-	m := c.tasks.RangeLock()
-	defer c.tasks.RangeUnlock()
+	m := c.tasks._m.RangeLock()
+	defer c.tasks._m.RangeUnlock()
 	for task := range m {
-		if c.claimed.Contains(task) && !c.handoffRequest.Contains(task) {
+		if c.claimed._m.Contains(task) && !c.handoffRequest._m.Contains(task) {
 			continue
 		}
 		data, err := getDeserialize(c.zk, path.Join(base, task))
@@ -240,7 +237,7 @@ func (c *Cluster) tryClaimTask(taskId string, data map[string]interface{}) {
 	}
 
 	if nodeId := c.taskAssigned(taskId); nodeId == "" || nodeId == c.config.NodeId {
-		c.claimTask(taskId, data, c.handoffRequest.Contains(taskId))
+		c.claimTask(taskId, data, c.handoffRequest._m.Contains(taskId))
 	}
 }
 
@@ -328,8 +325,8 @@ func (c *Cluster) verifyTasks() {
 	m := c.owned.RangeLock()
 	for taskId := range m {
 		// XXX have to use Contains() here because the watch function inserts nil values on start and we might not get an update
-		if !c.tasks.Contains(taskId) {
-			log.Printf("%s is no longer in tasks: %s", taskId, c.tasks.Dump())
+		if !c.tasks._m.Contains(taskId) {
+			log.Printf("%s is no longer in tasks: %s", taskId, c.tasks._m.Dump())
 			toRelease = append(toRelease, taskId)
 			continue
 		}
@@ -388,11 +385,11 @@ func (c *Cluster) handleHandoff(handoffClaims *SafeMap) {
 
 func (c *Cluster) initiateHandoff(taskId string) error {
 	// add task to handoff node
-	if !c.claimed.Contains(taskId) {
+	if !c.claimed._m.Contains(taskId) {
 		return nil
 	}
 
-	if c.handoffRequest.Contains(taskId) {
+	if c.handoffRequest._m.Contains(taskId) {
 		return nil
 	}
 

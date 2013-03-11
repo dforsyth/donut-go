@@ -123,7 +123,7 @@ func main() {
 	}
 	config := donut.NewConfig()
 
-	config.Servers = "localhost:50000"
+	config.Servers = "localhost:2181"
 	config.NodeId = "node-" + os.Args[1]
 	log.Printf("node id is %s", config.NodeId)
 
