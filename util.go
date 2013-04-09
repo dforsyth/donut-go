@@ -116,60 +116,120 @@ func (m *SafeMap) Keys() (keys []string) {
 	return
 }
 
-// Watch the children at path until a byte is sent on the returned channel
-// Uses the SafeMap more like a set, so you'll have to use Contains() for entries
-func watchZKChildren(zk *zookeeper.Conn, path string, children *SafeMap, onChange func(*SafeMap)) (chan byte, error) {
-	initial, _, watch, err := zk.ChildrenW(path)
-	if err != nil {
+func jsonDeserialize(data string) interface{} {
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &m); err != nil {
+		panic(err)
+	}
+	return m
+}
+
+func stringDeserialize(data string) interface{} {
+	return data
+}
+
+/*
+type ZKMap struct {
+	_m          *SafeMap
+	path        string
+	zk          *zookeeper.Conn
+	onChange    func(*ZKMap)
+	deserialize func(string) interface{}
+}
+
+func (m *ZKMap) Get(key string) interface{} {
+	return m._m.Get(key)
+}
+
+func (m *ZKMap) Contains(key string) bool {
+	return m._m.Contains(key)
+}
+
+func NewZKMap(zk *zookeeper.Conn, path string, deserialize func(string) interface{}, onChange func(*ZKMap)) (*ZKMap, error) {
+	m := &ZKMap{
+		_m:          NewSafeMap(nil),
+		path:        path,
+		zk:          zk,
+		onChange:    onChange,
+		deserialize: deserialize,
+	}
+	if err := m.watchChildren(); err != nil {
 		return nil, err
 	}
-	m := children.RangeLock()
-	for _, node := range initial {
-		m[node] = nil
+	return m, nil
+}
+
+// XXX this should return an error channel
+func (m *ZKMap) watchChildren() error {
+	children, _, watch, err := m.zk.ChildrenW(m.path)
+	if err != nil {
+		return err
 	}
-	children.RangeUnlock()
-	kill := make(chan byte, 1)
+
 	go func() {
-		defer close(kill)
-		var nodes []string
-		var err error
-		for {
-			select {
-			case <-kill:
-				// close(watch)
-				return
-			case event := <-watch:
-				if !event.Ok() {
-					continue
-				}
-				// close(watch)
-				nodes, _, watch, err = zk.ChildrenW(path)
-				if err != nil {
-					log.Printf("Error in watchZkChildren: %v", err)
-					// XXX I should really provide some way for the client to find out about this error...
-					return
-				}
-				m := children.RangeLock()
-				// mark all dead
-				for k := range m {
-					m[k] = 0
-				}
-				for _, node := range nodes {
-					m[node] = 1
-				}
-				for k, v := range m {
-					if v.(int) == 0 {
-						delete(m, k)
-					}
-				}
-				children.RangeUnlock()
-				onChange(children)
+		event := <-watch
+		switch event.Type {
+		case zookeeper.EVENT_CHILD:
+			if err := m.watchChildren(); err != nil {
+				// XXX log this and try again
+				panic("failed to watch children: " + err.Error())
 			}
+		default:
+			panic(event.String())
 		}
 	}()
-	log.Printf("watcher setup on %s", path)
-	return kill, nil
+
+	m.updateEntries(NewStringSet(children))
+	return nil
 }
+
+func (m *ZKMap) updateEntries(children *StringSet) {
+	keys := NewStringSet(m._m.Keys())
+	added := children.Difference(keys)
+	removed := keys.Difference(children)
+	for _, k := range added {
+		// TODO pull this all out into its own method
+		p := path.Join(m.path, k)
+		d, _, err := m.zk.Get(path.Join(p))
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		// unmashal and stuff it into the safemap
+		m._m.Put(k, m.deserialize(d))
+	}
+	for _, k := range removed {
+		m._m.Delete(k)
+	}
+	if len(added) > 0 || len(removed) > 0 {
+		m.onChange(m)
+	}
+}
+
+type StringSet struct {
+	m map[string]struct{}
+}
+
+func NewStringSet(initial []string) *StringSet {
+	s := &StringSet{
+		m: make(map[string]struct{}),
+	}
+	for _, e := range initial {
+		s.m[e] = struct{}{}
+	}
+	return s
+}
+
+func (s *StringSet) Difference(o *StringSet) (difference []string) {
+	for k := range s.m {
+		if _, ok := o.m[k]; !ok {
+			difference = append(difference, k)
+		}
+	}
+	return
+}
+*/
 
 func serializeCreate(zk *zookeeper.Conn, path string, data map[string]interface{}) (err error) {
 	var e []byte
@@ -191,20 +251,20 @@ func getDeserialize(zk *zookeeper.Conn, path string) (data map[string]interface{
 	return
 }
 
-// Create work in a cluster
-func CreateWork(clusterName string, zk *zookeeper.Conn, config *Config, workId string, data map[string]interface{}) (err error) {
-	p := path.Join("/", clusterName, config.WorkPath, workId)
+// Create a task in a cluster
+func CreateTask(clusterName string, zk *zookeeper.Conn, taskId string, data map[string]interface{}) (err error) {
+	p := path.Join("/", clusterName, "tasks", taskId)
 	if err = serializeCreate(zk, p, data); err != nil {
-		log.Printf("Failed to create work %s (%s): %v", workId, p, err)
+		log.Printf("Failed to create task %s (%s): %v", taskId, p, err)
 	} else {
-		log.Printf("Created work %s", p)
+		log.Printf("Created task %s", p)
 	}
 	return
 }
 
-// Remove work from a cluster
-func CompleteWork(clusterName string, zk *zookeeper.Conn, config *Config, workId string) {
-	p := path.Join("/", clusterName, config.WorkPath, workId)
+// Remove a task from a cluster
+func CompleteTask(clusterName string, zk *zookeeper.Conn, taskId string) {
+	p := path.Join("/", clusterName, "tasks", taskId)
 	zk.Delete(p, -1)
-	log.Printf("Deleted work %s (%s)", workId, p)
+	log.Printf("Deleted task %s (%s)", taskId, p)
 }
