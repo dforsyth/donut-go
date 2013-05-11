@@ -244,6 +244,7 @@ func (c *Cluster) getTasks() {
 	}
 }
 
+// try and claim taskId
 func (c *Cluster) tryClaimTask(taskId string) {
 	if c.owned.Get(taskId) != nil {
 		return
@@ -257,6 +258,7 @@ func (c *Cluster) tryClaimTask(taskId string) {
 	}
 }
 
+// claim taskId, as a handoff is handoffClaim is true
 func (c *Cluster) claimTask(taskId string, handoffClaim bool) (err error) {
 	var claim string
 	if handoffClaim {
@@ -278,6 +280,7 @@ func (c *Cluster) claimTask(taskId string, handoffClaim bool) (err error) {
 	return
 }
 
+// claim a task assigned to this node
 func (c *Cluster) claimAssigned(taskId string) {
 	if c.taskAssigned(taskId) != c.config.NodeId {
 		return
@@ -295,6 +298,7 @@ func (c *Cluster) claimAssigned(taskId string) {
 	}
 }
 
+// returns the owner of a task
 func (c *Cluster) taskOwner(taskId string) (node string, err error) {
 	if data := c.claimed.Get(taskId); data != nil {
 		return data.(string), nil
@@ -302,6 +306,7 @@ func (c *Cluster) taskOwner(taskId string) (node string, err error) {
 	return "", errors.New(taskId + " not in claimed.")
 }
 
+// determine this node owns a task
 func (c *Cluster) ownTask(taskId string) bool {
 	if node, err := c.taskOwner(taskId); err == nil {
 		return node == c.config.NodeId
@@ -309,6 +314,7 @@ func (c *Cluster) ownTask(taskId string) bool {
 	return false
 }
 
+// determine which node a task is assigned to
 func (c *Cluster) taskAssigned(taskId string) string {
 	info := c.TaskData(taskId)
 	if info == nil {
@@ -321,6 +327,7 @@ func (c *Cluster) taskAssigned(taskId string) string {
 	return ""
 }
 
+// start taskId
 func (c *Cluster) startTask(taskId string) {
 	// TODO check to see if this put succeeds.  If it doesn't, do not start a new task (it is already started)
 	c.owned.Put(taskId, nil)
@@ -330,6 +337,7 @@ func (c *Cluster) startTask(taskId string) {
 	go c.listener.StartTask(taskId)
 }
 
+// end taskId
 func (c *Cluster) endTask(taskId string) {
 	if c.owned.Contains(taskId) {
 		c.zk.Delete(path.Join(c.claimsPath, taskId))
@@ -339,6 +347,7 @@ func (c *Cluster) endTask(taskId string) {
 	log.Printf("Ended task %s", taskId)
 }
 
+// verify the tasks this node it working on, releasing any that appear to be bogus
 func (c *Cluster) verifyTasks() {
 	var toRelease []string
 	m := c.owned.RangeLock()
@@ -368,13 +377,15 @@ func (c *Cluster) verifyTasks() {
 // Shutdown ends all tasks running on *c and removes it from the cluster it is a member of
 func (c *Cluster) Shutdown() {
 	log.Printf("%s shutting down", c.config.NodeId)
-	atomic.StoreInt32(&c.state, ShutdownState)
+	atomic.StoreInt32(&c.state, DrainingState)
 	c.rebalanceKill <- 1
 	m := c.owned.RangeLock()
 	c.owned.RangeUnlock()
+	// TODO: drain properly instead of just assuming everything stops when endTask is called
 	for taskId := range m {
 		c.endTask(taskId)
 	}
+	atomic.StoreInt32(&c.state, ShutdownState)
 	c.finish()
 	c.listener.OnLeave()
 	atomic.StoreInt32(&c.state, NewState)
@@ -425,8 +436,8 @@ func (c *Cluster) completeHandoffReceive(taskId string) {
 	// XXX claim task and remove handoff claim entry
 	log.Printf("Completing handoff receive for %s", taskId)
 	var err error
+	claim := path.Join(c.claimsPath, taskId)
 	for {
-		claim := path.Join(c.claimsPath, taskId)
 		if err = c.zk.CreateEphemeral(claim, c.config.NodeId); err == nil || c.ownTask(claim) {
 			// we have created our claim node, we can delete the handoff claim node
 			c.zk.Delete(path.Join(c.handoffClaimsPath, taskId))
