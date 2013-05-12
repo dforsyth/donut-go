@@ -1,12 +1,12 @@
 package donut
 
 import (
-	zkutil "github.com/dforsyth/sprinkles/zookeeper"
+	"github.com/dforsyth/sprinkles/zookeeper"
 )
 
 type Listener interface {
 	// Called when the listener joins a cluster
-	OnJoin(*zkutil.ZooKeeper)
+	OnJoin(*zookeeper.ZooKeeper)
 	// Called when the listener leaved a cluster
 	OnLeave()
 	// Called when a task is started
