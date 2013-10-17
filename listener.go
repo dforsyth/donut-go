@@ -7,7 +7,7 @@ import (
 type Listener interface {
 	// Called when the listener joins a cluster
 	OnJoin(*zookeeper.ZooKeeper)
-	// Called when the listener leaved a cluster
+	// Called when the listener leaves a cluster
 	OnLeave()
 	// Called when a task is started
 	StartTask(string)
