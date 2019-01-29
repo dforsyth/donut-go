@@ -1,16 +1,14 @@
-Donut is a library for building clustered applications in Go.
+package main
 
-## Example Service
-
-```go
 import (
 	"context"
 	"log"
 	"os"
 
+	// Wait for etcd client v3.4, there is a module import issue.
+	client "github.com/coreos/etcd/clientv3" // "go.etcd.io/etcd/clientv3"
 	"github.com/dforsyth/donut/cluster"
 	"github.com/dforsyth/donut/coordinator"
-	client "go.etcd.io/etcd/clientv3"
 )
 
 type ExampleListener struct {
@@ -33,7 +31,7 @@ func main() {
 	client, err := client.New(client.Config{
 		Endpoints: []string{"http://0.0.0.0:2379"},
 	})
-	kv, err := coordinator.NewEtcdKV(client)
+	kv, err := coordinator.NewEtcdCoordinator(client)
 	if err != nil {
 		logger.Fatalf("Failed to create kv: %s", err)
 	}
@@ -42,8 +40,3 @@ func main() {
 	}
 	select {}
 }
-```
-
-## Documentation
-
-http://go.pkgdoc.org/github.com/dforsyth/donut
