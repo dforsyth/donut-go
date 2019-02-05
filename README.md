@@ -1,6 +1,6 @@
 Donut is a library for building clustered applications in Go.
 
-## Example Service
+## Example
 
 ```go
 import (
@@ -47,3 +47,8 @@ func main() {
 ## Documentation
 
 http://go.pkgdoc.org/github.com/dforsyth/donut
+
+
+### TODO
+- [ ] Better testing
+- [ ] More examples
