@@ -31,11 +31,14 @@ func main() {
 	client, err := client.New(client.Config{
 		Endpoints: []string{"http://0.0.0.0:2379"},
 	})
-	kv, err := coordinator.NewEtcdCoordinator(client)
 	if err != nil {
-		logger.Fatalf("Failed to create kv: %s", err)
+		logger.Fatalf("Failed to create client: %s", err)
 	}
-	if err := c.Join(kv); err != nil {
+	coo, err := coordinator.NewEtcdCoordinator(client)
+	if err != nil {
+		logger.Fatalf("Failed to create coordinator: %s", err)
+	}
+	if err := c.Join(coo); err != nil {
 		logger.Fatalf("Failed to join cluster: %s", err)
 	}
 	select {}
